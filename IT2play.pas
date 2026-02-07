@@ -80,10 +80,12 @@ const
 
 type
 	TAudioDriverType = (
-		DRIVER_HQ        = 0, // 8bb: high-quality custom driver
-		DRIVER_SB16MMX   = 1,
-		DRIVER_SB16      = 2,
-		DRIVER_WAVWRITER = 3
+		DRIVER_NONE,
+		DRIVER_DEFAULT,
+		DRIVER_WAVWRITER,
+		DRIVER_SB16,
+		DRIVER_SB16MMX,
+		DRIVER_HQ
 	);
 
 	TModuleType = (
@@ -418,7 +420,7 @@ type
 		LastMIDIByte, MIDIInterpretState, MIDIInterpretType: Byte;
 		MIDIDataArea: array [0..(9+16+128)*32-1] of Byte;
 
-		procedure NoCommand(hc: THostChannel);
+		procedure NoCommand({%H-}hc: THostChannel);
 
 		procedure VolumeCommandC(hc: THostChannel);
 		procedure VolumeCommandD(hc: THostChannel);
@@ -578,7 +580,6 @@ type
 		procedure Update;
 		procedure FillAudioBuffer(Buffer: PInt16; NumSamples: Cardinal);
 
-		function  InitAudio(MixingFrequency, MixingBufferSize: Cardinal; DriverType: TAudioDriverType): Boolean;
 		//procedure Close;
 		procedure Stop;
 		//procedure StopChannels;
@@ -594,7 +595,7 @@ type
 
 		//function  RenderToWAV(Filename: String): Boolean;
 
-		constructor Create;
+		constructor Create(MixingFrequency: Cardinal = 44100; DriverType: TAudioDriverType = DRIVER_DEFAULT);
 		destructor  Destroy; override;
 	end;
 
@@ -614,14 +615,14 @@ uses
 // ================================================================================================
 
 
-procedure Debug(const Msg: String);
+procedure Debug(const {%H-}Msg: String);
 begin
 	{$IFDEF DEBUGLOG}
 	WriteLn(Msg);
 	{$ENDIF}
 end;
 
-procedure DebugInfo(const Msg: String);
+procedure DebugInfo(const {%H-}Msg: String);
 begin
 	{$IFDEF DEBUGLOG}
 	Debug(Msg);
@@ -950,15 +951,13 @@ var
 	LastSmp16: Int16;
 	i, j, BytesToUnpack: Cardinal;
 	PackedLen: Word;
-	DecompBuffer: array of Byte;
+	DecompBuffer: array [0..64*1024] of Byte;
 begin
 	Result := False;
 	if Stream = nil then Exit;
 
 	DebugInfo(Format('LoadCompressedSample(16bit=%d, Stereo=%d, Delta=%d)',
 		[BoolToInt[is16bit], BoolToInt[isstereo], BoolToInt[IsDeltaEncoded]]));
-
-	SetLength(DecompBuffer, 64*1024);
 
 	for Chan := False to IsStereo do
 	begin
@@ -970,7 +969,7 @@ begin
 			PackedLen := Stream.ReadWord;
 			DebugInfo('  PackedLen    =' + PackedLen.ToString);
 			DebugInfo('  BytesToUnpack=' + BytesToUnpack.ToString);
-			Stream.ReadBuffer(DecompBuffer[0], PackedLen);
+			Stream.ReadBuffer({%H-}DecompBuffer[0], PackedLen);
 
 			if Is16bit then
 			begin
@@ -4953,7 +4952,7 @@ function TITModule.LoadS3M(Stream: TStream): Boolean;
 	var
 		i: Integer;
 	begin
-		SetLength(Result, L);
+		SetLength(Result{%H-}, L);
 		Stream.ReadBuffer(Result[1], L);
 
 		for i := 1 to L do
@@ -4973,7 +4972,6 @@ var
 	Chan, IsStereo, Is16Bit: Boolean;
 	PackedData: array of Byte;
 	Sam: TSample;
-	P: TPattern;
 	Ptr8: PInt8;
 	Ptr16: PInt16;
 begin
@@ -4988,7 +4986,7 @@ begin
 	Header.OrdNum := Stream.ReadWord;
 	Header.SmpNum := Stream.ReadWord;
 	Header.PatNum := Stream.ReadWord;
-	Header.Flags.WordAccess := Stream.ReadWord;
+	Flags := Stream.ReadWord;
 
 	Stream.Seek(SP+$30, soBeginning);
 
@@ -5051,8 +5049,8 @@ begin
 
 	FillByte(Orders[0], MAX_ORDERS, 255);
 	Stream.ReadBuffer(Orders[0],  Header.OrdNum);  // Order list loaded
-	Stream.ReadBuffer(SmpPtrs[0], Header.SmpNum * 2);
-	Stream.ReadBuffer(PatPtrs[0], Header.PatNum * 2);
+	Stream.ReadBuffer({%H-}SmpPtrs[0], Header.SmpNum * 2);
+	Stream.ReadBuffer({%H-}PatPtrs[0], Header.PatNum * 2);
 
 	if DefPan = 252 then // 8bb: load custom channel pans, if present
 	begin
@@ -5164,14 +5162,12 @@ begin
 	try
 		for i := 0 to Header.PatNum-1 do
 		begin
-			P := Patterns[i];
-
 			Offset := PatPtrs[i] << 4;
 			if Offset = 0 then Continue;
 
 			Stream.Seek(SP + Offset, soBeginning);
 			PackedPatLength := Stream.ReadWord;
-			SetLength(PackedData, PackedPatLength);
+			SetLength(PackedData{%H-}, PackedPatLength);
 			Stream.ReadBuffer(PackedData[0], PackedPatLength);
 
 			if not TranslateS3MPattern(@PackedData[0], i) then
@@ -5190,7 +5186,7 @@ function TITModule.LoadIT(Stream: TStream): Boolean;
 	var
 		i: Integer;
 	begin
-		SetLength(Result, L);
+		SetLength(Result{%H-}, L);
 		Stream.ReadBuffer(Result[1], L);
 
 		for i := 1 to L do
@@ -5640,7 +5636,7 @@ begin
 	OldOffset := Stream.Position;
 	DataLen   := Stream.Size;
 
-	Stream.ReadBuffer(Hdr[0], Length(Hdr));
+	Stream.ReadBuffer({%H-}Hdr[0], Length(Hdr));
 
 	if (DataLen >= 4) and (CompareChar(Hdr[0], STR_IT[1], 4) = 0) then
 		Result := FORMAT_IT
@@ -5760,26 +5756,6 @@ begin
 		Driver.Mix(NumSamples, Buffer);
 end;
 
-function TITModule.InitAudio(MixingFrequency, MixingBufferSize: Cardinal;
-	DriverType: TAudioDriverType): Boolean;
-begin
-{
-  void lockMixer(void); // waits for the current mixing block to finish and disables further mixing
-  void unlockMixer(void); // enables mixing again
-  bool openMixer(int32_t mixingFrequency, int32_t mixingBufferSize); // 16000..64000, 256..8192 (true if ok, false if fail)
-  void closeMixer(void);
-}
-	if Driver <> nil then
-	begin
-		//Music_Close;
-		Driver.Free;
-	end;
-
-//	Driver := TITAudioDriver_SB16.Create(Self, MixingFrequency);
-	Driver := TITAudioDriver_SB16MMX.Create(Self, MixingFrequency);
-	Result := Driver <> nil;
-end;
-
 procedure TITModule.Stop;
 var
 	i: Integer;
@@ -5892,7 +5868,7 @@ begin
 			FreeAndNil(Instruments[i]);
 end;
 
-constructor TITModule.Create;
+constructor TITModule.Create(MixingFrequency: Cardinal; DriverType: TAudioDriverType);
 var
 	i: Integer;
 begin
@@ -5929,16 +5905,36 @@ begin
 	for i := 0 to MAX_INSTRUMENTS-1 do
 		Instruments[i] := TInstrument.Create;
 
+	{
+	procedure LockMixer; // waits for the current mixing block to finish and disables further mixing
+	procedure UnlockMixer; // enables mixing again
+	function  OpenMixer(MixingFrequency, MixingBufferSize: Integer); // 16000..64000, 256..8192
+	procedure CloseMixer(void);
+	}
+
+	if Driver <> nil then
+		Driver.Free;
+
+	Driver := nil;
+
+	if DriverType = DRIVER_DEFAULT then
+		DriverType := DRIVER_SB16MMX; // !!! update when adding better driver
+
+	case DriverType of
+		DRIVER_WAVWRITER: ;
+		DRIVER_SB16:      Driver := TITAudioDriver_SB16.Create(Self, MixingFrequency);
+		DRIVER_SB16MMX:   Driver := TITAudioDriver_SB16MMX.Create(Self, MixingFrequency);
+		DRIVER_HQ:        ;
+		else              ;
+	end;
+
 	Stop;
 end;
 
 destructor TITModule.Destroy;
-var
-	i: Integer;
 begin
 	FreeSong;
 
-	//Close;
 	SongMessage.Free;
 	EmptyPattern.Free;
 
