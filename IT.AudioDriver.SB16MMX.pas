@@ -50,54 +50,6 @@ type
 	end;
 
 
-(*	TSlaveChannel (sc) definitions:
-
-		Instrument:  TInstrument;
-		Sample:      TSample;
-		HostChannel: THostChannel;
-
-		LoopBegin, LoopEnd: Cardinal;
-
-		SamplingPosition: Cardinal;
-		Delta32, Frac32:  Cardinal;
-		FinalVol32768: Word;
-		SmpIs16Bit: Boolean;
-		MixOffset: Cardinal; // 8bb: which sample mix function to use
-		VolEnvState, PanEnvState, PitchEnvState: TEnvState;
-
-		// 8bb: added these
-		OldSamples:  array [0..1] of Int32;
-		fOldSamples: array [0..3] of Float;
-		DestVol, CurrVol: array [Boolean] of Int32; // 8bb: ramp
-		filterA, filterB, filterC: Int32;
-		fFilterA, fFilterB, fFilterC: Float;
-
-		// 8bb: for custom HQ mixer
-		HasLooped: Boolean;
-		fVolume, fOldVolume,
-		fDestVol, fCurrVol: array [Boolean] of Float;
-		Frac64, Delta64: UInt64;
-
-		// 8bb: for interpolation taps
-		leftTmpSamples16, rightTmpSamples16: array [Boolean, 0..3] of Int16;
-		leftTmpSamples8,  rightTmpSamples8:  array [Boolean, 0..3] of Int8;
-
-		LoopMode, LoopDirection: Byte;
-		Volume, OldVolume: array [Boolean] of Int32;
-		Frequency, FrequencySet: Int32;
-		AutoVibratoPos: Byte;
-		AutoVibratoDepth: Word;
-		FinalVol128, Vol, VolSet, ChnVol, SmpVol, FinalPan: Byte;
-		FadeOut: Word;
-		MIDIBank: Word;
-		DCT, DCA, Pan, PanSet: Byte;
-
-		Note, Ins, Smp: Byte;
-		HostChnNum, NNA, MIDIChn, MIDIProg: Byte;
-	end;
-*)
-
-
 implementation
 
 
@@ -256,8 +208,6 @@ var
 	// M32Bit8MV_M2
 	procedure DoMix; inline;
 	begin
-		//Get8BitWaveForm;
-
 		fract := sc.Frac32 >> 1;
 		sample  := smp[0];
 		sample2 := smp[1];
@@ -284,8 +234,6 @@ var
 	// M32Bit16MV_M2
 	procedure DoMix; inline;
 	begin
-		//Get16BitWaveForm;
-
 		fract := sc.Frac32 >> 1;
 		sample2 := smp[1] * fract;
 		fract := fract xor (MIX_FRAC_MASK >> 1);
@@ -312,18 +260,6 @@ var
 	var
 		s64: Int64;
 	begin
-		// Get8BitWaveFormFiltered;
-		(*
-		frac = sc->Frac32 >> 1;
-		sample = smp[0];
-		sample2 = smp[1];
-		sample = (sample << 8) | (uint8_t)sample;
-		sample2 = (sample2 << 8) | (uint8_t)sample2;
-		sample2 *= frac;
-		frac ^= MIX_FRAC_MASK>>1;
-		sample *= frac;
-		sample = (sample + sample2) >> MIX_FRAC_BITS;
-		*)
 		fract   := sc.Frac32 >> 1;
 		sample  := smp[0];
 		sample2 := smp[1];
@@ -334,46 +270,13 @@ var
 		sample  *= fract;
 		sample  := SarLongint(sample + sample2, MIX_FRAC_BITS);
 
-		//FilterSample;
-		(*
-		sample = (int32_t)(((int64_t)(sample            * sc->filtera) +
-		                    (int64_t)(sc->OldSamples[0] * sc->filterb) +
-		                    (int64_t)(sc->OldSamples[1] * sc->filterc)) >> FILTER_BITS);
-		     if (sample < INT16_MIN) sample = INT16_MIN;
-		else if (sample > INT16_MAX) sample = INT16_MAX;
-		sc->OldSamples[1] = sc->OldSamples[0]; \
-		sc->OldSamples[0] = sample;
-		*)
-		s64 :=  (sample           * sc.filtera) +
-		        (sc.OldSamples[0] * sc.filterb) +
-		        (sc.OldSamples[1] * sc.filterc);
-		s64 := SarInt64(s64, FILTER_BITS);
-		if s64 < -32768 then s64 := -32768 else
-		if s64 > +32767 then s64 := +32767;
-		sample := s64;
-		sc.OldSamples[1] := sc.OldSamples[0];
-		sc.OldSamples[0] := sample;
+		FilterSample;
 
 		PutSamplesRamped;
 	end;
 
 begin
-//	MixItRamped =>
-
-	GetSamplePtrs;
-
-	if Odd(NumSamples) then begin
-		DoMix;
-		RampCurrVolume1;
-		Dec(NumSamples);
-	end;
-
-	for i := 0 to NumSamples-1 do begin
-		DoMix;
-		if Odd(i) then RampCurrVolume2;
-	end;
-
-	sc.SamplingPosition := Int32(smp - base);
+	MixItRamped;
 end;
 
 procedure TITAudioDriver_SB16MMX.M32Bit16MF(sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal);
@@ -387,14 +290,6 @@ var
 	var
 		s64: Int64;
 	begin
-		// Get16BitWaveFormFiltered;
-		(*
-		frac = sc->Frac32 >> 1;
-		sample2 = smp[1] * frac;
-		frac ^= MIX_FRAC_MASK>>1;
-		sample = smp[0] * frac;
-		sample = (sample + sample2) >> MIX_FRAC_BITS;
-		*)
 		fract := sc.Frac32 >> 1;
 		sample2 := smp[1] * fract;
 		fract := fract xor (MIX_FRAC_MASK >> 1);
@@ -424,10 +319,10 @@ var
 
 	procedure Fix32; inline;
 	begin
-		{.$IFDEF CPU32}
+		{$IFDEF CPU32}
 		// 8bb: limit it so we can do a hardware 32-bit div (instead of slow software 64-bit div)
 		if SamplesToMix > $FFFF then SamplesToMix := $FFFF;
-		{.$ENDIF}
+		{$ENDIF}
 	end;
 
 var
@@ -513,10 +408,6 @@ begin
 
 			if sc.Flags.SF_FREQ_CHANGE then
 			begin
-				{
-				if ((uint32_t)sc->Frequency>>MIX_FRAC_BITS >= Driver.MixSpeed ||
-					(uint32_t)sc->Frequency >= INT32_MAX/2)
-				}
 				if (SarLongInt(sc.Frequency, MIX_FRAC_BITS) >= MixSpeed) or
 					(sc.Frequency >= (MaxInt div 2)) then
 				begin
@@ -529,18 +420,7 @@ begin
 				end;
 
 				// 8bb: calculate mixer delta (could be faster, but slow method needed for OldSamplesBug)
-				(*
-				uint32_t Quotient  = (uint32_t)sc->Frequency / Driver.MixSpeed;
-				uint32_t Remainder = (uint32_t)sc->Frequency % Driver.MixSpeed;
-				sc->Delta32 = Quotient << MIX_FRAC_BITS;
-				Remainder <<= MIX_FRAC_BITS;
-				Quotient = (uint32_t)Remainder / Driver.MixSpeed;
-				Remainder = (uint32_t)Remainder % Driver.MixSpeed;
-				sc->Delta32 |= (uint16_t)Quotient;
-
-				OldSamplesBug = (uint16_t)Remainder; // 8bb: fun
-				*)
-
+				//
 				Quotient  := Cardinal(sc.Frequency) div MixSpeed;
 				Remainder := Cardinal(sc.Frequency) mod MixSpeed;
 				sc.Delta32 := Quotient << MIX_FRAC_BITS;
@@ -593,7 +473,6 @@ begin
 					sc.filterc := 0;
 					sc.OldSamples[0] := 0;
 					sc.OldSamples[1] := 0;
-					// -----------------------
 
 					for Chan in Boolean do
 					begin
