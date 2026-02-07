@@ -66,9 +66,6 @@
     </RunParams>
     <RequiredPackages>
       <Item>
-        <PackageName Value="SDL3_package"/>
-      </Item>
-      <Item>
         <PackageName Value="LCL"/>
       </Item>
     </RequiredPackages>
@@ -84,14 +81,6 @@
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
         <UnitName Value="Main"/>
-      </Unit>
-      <Unit>
-        <Filename Value="..\..\IT.AudioDriver.SB16.pas"/>
-        <IsPartOfProject Value="True"/>
-      </Unit>
-      <Unit>
-        <Filename Value="..\..\IT.AudioDriver.SB16MMX.pas"/>
-        <IsPartOfProject Value="True"/>
       </Unit>
     </Units>
   </ProjectOptions>
@@ -121,6 +110,11 @@
         <DebugInfoType Value="dsDwarf3"/>
         <UseHeaptrc Value="True"/>
       </Debugging>
+      <Options>
+        <Win32>
+          <GraphicApplication Value="True"/>
+        </Win32>
+      </Options>
     </Linking>
     <Other>
       <CustomOptions Value="-dDEBUGLOG"/>

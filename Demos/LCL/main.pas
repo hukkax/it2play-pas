@@ -1,16 +1,28 @@
 unit Main;
 
-{$DEFINE AUDIO}
-
 {$MODE DELPHI}
 {$H+}
+{$MACRO ON}
+
+// on Windows, use WinMM for audio output
+// on other systems, require SDL3 for this example
+// NOTE! Add SDL3_package to required packages in IDE if using SDL3
+// TODO: Show waveform while playing with WinMM driver
+
+{$IFDEF WINDOWS}
+	{$DEFINE AudioDeviceUnit  := IT.AudioDevice.WinMM}
+	{$DEFINE TAudioDeviceType := TITAudioDevice_WinMM}
+{$ELSE}
+	{$DEFINE AudioDeviceUnit  := IT.AudioDevice.SDL3}
+	{$DEFINE TAudioDeviceType := TITAudioDevice_SDL3}
+{$ENDIF}
 
 interface
 
 uses
 	Classes, SysUtils, Forms, Controls, Graphics, Dialogs,
 	LCLType, StdCtrls, ExtCtrls,
-	{$IFDEF AUDIO}SDL3,{$ENDIF}
+	AudioDeviceUnit, // <- macro!
 	IT2play;
 
 type
@@ -21,9 +33,9 @@ type
 		ListBox1: TListBox;
 		Memo: TMemo;
 		pbSample: TPaintBox;
+
 		procedure FormShow(Sender: TObject);
 		procedure FormDestroy(Sender: TObject);
-		procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 		procedure bPlayClick(Sender: TObject);
 		procedure TimerTimer(Sender: TObject);
 		procedure pbPaint(Sender: TObject);
@@ -33,17 +45,12 @@ type
 	private
 		procedure LoadModule(const Filename: String);
 	public
+		Module: TITModule;
+		Output: TAudioDeviceType; // <- macro!
 	end;
 
 var
 	Form1: TForm1;
-	Module: TITModule;
-	{$IFDEF AUDIO}
-	Audio: PSDL_AudioStream;
-	{$ENDIF}
-
-	Buffer: array of Byte;
-	BufferUpdating: Boolean;
 
 
 implementation
@@ -51,52 +58,59 @@ implementation
 {$R *.lfm}
 
 
-{$IFDEF AUDIO}
-procedure AudioCallback(userdata: Pointer; stream: PSDL_AudioStream; additional_amount, total_amount: Longint); cdecl;
-begin
-	while BufferUpdating do;
-	BufferUpdating := True;
-
-	if Length(Buffer) <= total_amount then
-		SetLength(Buffer, total_amount+1);
-
-	Module.FillAudioBuffer(@Buffer[0], total_amount div 4); // stereo 16-bit signed samples
-	SDL_PutAudioStreamData(stream, @Buffer[0], total_amount);
-
-	BufferUpdating := False;
-end;
-{$ENDIF}
-
 procedure TForm1.FormShow(Sender: TObject);
-const
-	AudioFreq = 44100;
-var
-	{$IFDEF AUDIO}
-	AudioSpec: TSDL_AudioSpec;
-	{$ENDIF}
 begin
 	OnShow := nil;
 
-	{$IFDEF AUDIO}
-	AudioSpec.Channels := 2;
-	AudioSpec.Freq   := AudioFreq;
-	AudioSpec.Format := SDL_AUDIO_S16LE;
-	{$ELSE}
-	SetLength(Buffer, 1024*4);
-	{$ENDIF}
+	// create the it2play instance
+	Module := TITModule.Create;
 
-	Module := TITModule.Create(AudioFreq);
+	// initialize audio output device
+	Output := TAudioDeviceType.Create(Module, 44100);
 
-	{$IFDEF AUDIO}
-	if SDL_Init(SDL_INIT_AUDIO) then
+	// initialize the module with defaults
+	Module.Init(DRIVER_DEFAULT, Output.Frequency);
+end;
+
+procedure TForm1.FormDestroy(Sender: TObject);
+begin
+	Module.Free;
+	Output.Free;
+end;
+
+procedure TForm1.bPlayClick(Sender: TObject);
+begin
+	if Module.Playing then
 	begin
-		Audio := SDL_OpenAudioDeviceStream(
-			SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-			@AudioSpec, AudioCallback, nil);
+		Module.Stop;
+		bPlay.Caption := 'Play';
 	end
 	else
-		ShowMessage('ERROR: Could not init audio!');
-	{$ENDIF}
+	if Module.Play then
+	begin
+		bPlay.Caption := 'Stop';
+	end;
+
+	Timer.Enabled := Module.Playing;
+end;
+
+procedure TForm1.TimerTimer(Sender: TObject);
+begin
+	// display song progress
+	Caption := Format('Order: %d, Pattern: %d, Row: %d',
+		[Module.CurrentOrder, Module.CurrentPattern, Module.CurrentRow]);
+
+	// paint a waveform of outgoing audio
+	pb.Invalidate;
+end;
+
+procedure TForm1.FormDropFiles(Sender: TObject; const FileNames: array of string);
+var
+	S: String;
+begin
+	S := FileNames[0];
+	if (S <> '') and (FileExists(S)) then
+		LoadModule(S);
 end;
 
 procedure TForm1.LoadModule(const Filename: String);
@@ -107,12 +121,9 @@ begin
 	ListBox1.Items.Clear;
 
 	if Module.Playing then
-	begin
-		bPlayClick(Self);
-		while BufferUpdating do;
-	end;
+		while Output.Buffer.Updating do;
 
-	if not Module.LoadFromFile(Filename)  then // ins
+	if not Module.LoadFromFile(Filename) then
 	begin
 		ShowMessage('ERROR: Could not load module!');
 		Exit;
@@ -133,50 +144,6 @@ begin
 	ListBox1Click(Self);
 end;
 
-procedure TForm1.FormDestroy(Sender: TObject);
-begin
-	{$IFDEF AUDIO}
-	SDL_DestroyAudioStream(Audio);
-	SDL_Quit;
-	{$ENDIF}
-
-	Module.Free;
-end;
-
-procedure TForm1.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
-begin
-	if Key = VK_ESCAPE then Close;
-end;
-
-procedure TForm1.bPlayClick(Sender: TObject);
-begin
-	if Module.Playing then
-	begin
-		bPlay.Caption := 'Play';
-		{$IFDEF AUDIO}
-		SDL_PauseAudioStreamDevice(Audio);
-		{$ENDIF}
-		Module.Stop;
-	end
-	else
-	if Module.Play() then
-	begin
-		bPlay.Caption := 'Stop';
-		{$IFDEF AUDIO}
-		SDL_ResumeAudioStreamDevice(Audio);
-		{$ENDIF}
-	end;
-
-	Timer.Enabled := Module.Playing;
-end;
-
-procedure TForm1.TimerTimer(Sender: TObject);
-begin
-	Caption := Format('Order: %d, Pattern: %d, Row: %d', [Module.CurrentOrder, Module.CurrentPattern, Module.CurrentRow]);
-
-	pb.Invalidate;
-end;
-
 procedure TForm1.pbPaint(Sender: TObject);
 var
 	X, Y, W, H: Integer;
@@ -192,17 +159,14 @@ begin
 	pb.Canvas.PenPos := Point(0, H div 2);
 	pb.Canvas.Pen.Color := clWhite;
 
+	// ugly!
 	if Module.Playing then
 	begin
-		if BufferUpdating then Exit;
+		if Output.Buffer.Updating then Exit;
 
-		{$IFNDEF AUDIO}
-		Module.FillAudioBuffer(@Buffer[0], 1024);
-		{$ENDIF}
+		Output.Buffer.Updating := True;
 
-		BufferUpdating := True;
-
-		P := @Buffer[0];
+		P := @Output.Buffer.Data[0];
 
 		for X := 0 to W-1 do
 		begin
@@ -211,7 +175,7 @@ begin
 			Inc(P, 2);
 		end;
 
-		BufferUpdating := False;
+		Output.Buffer.Updating := False;
 	end;
 end;
 
@@ -262,16 +226,6 @@ begin
 			pbSample.Canvas.LineTo(X, H-Y);
 		end;
 	end;
-end;
-
-procedure TForm1.FormDropFiles(Sender: TObject; const FileNames: array of string);
-var
-	S: String;
-begin
-	S := FileNames[0];
-	if (S = '') or (not FileExists(S)) then Exit;
-
-	LoadModule(S);
 end;
 
 procedure TForm1.ListBox1Click(Sender: TObject);

@@ -8,9 +8,9 @@ object Form1: TForm1
   ClientHeight = 741
   ClientWidth = 859
   KeyPreview = True
+  LCLVersion = '4.0.0.4'
   OnDestroy = FormDestroy
   OnDropFiles = FormDropFiles
-  OnKeyDown = FormKeyDown
   OnShow = FormShow
   object bPlay: TButton
     Left = 12
