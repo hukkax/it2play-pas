@@ -158,6 +158,8 @@ type
 
 		procedure Decompress16BitData(Dst: PInt16; Src: PByte;   BlockLength: Cardinal);
 		procedure Decompress8BitData (Dst: PInt8;  Src: Pointer; BlockLength: Cardinal);
+	private
+		Module: TITModule;
 	public
 		Flags: TBitFlags8(
 			SMPF_ASSOCIATED_WITH_HEADER,
@@ -183,6 +185,8 @@ type
 		procedure ReleaseSample;
 
 		function  LoadCompressedSample(Stream: TStream; Is16Bit, IsStereo, IsDeltaEncoded: Boolean): Boolean;
+
+		constructor Create(AModule: TITModule);
 	end;
 
 	TSlaveChannel = class;
@@ -392,6 +396,10 @@ type
 		ChnlPan, ChnlVol: array [0..MAX_HOST_CHANNELS-1] of Byte;
 	end;
 
+	TMixerDefaultEvent = procedure(Module: TITModule) of Object;
+	TMixerBoolEvent    = procedure(Module: TITModule; Value: Boolean) of Object;
+	TMixerOpenEvent    = function(Module: TITModule; MixingFrequency, MixingBufferSize: Cardinal): Boolean of Object;
+
 	TITModule = class
 	type
 		TCommandProc = procedure(hc: THostChannel) of Object;
@@ -546,6 +554,11 @@ type
 
 		function  LoadIT (Stream: TStream): Boolean;
 		function  LoadS3M(Stream: TStream): Boolean;
+
+		function  OpenMixer(MixingFrequency, MixingBufferSize: Word): Boolean; // 16000..64000, 256..8192
+		procedure LockMixer;
+		procedure UnlockMixer;
+		procedure CloseMixer;
 	public
 		Header: TITHeader;
 
@@ -573,6 +586,12 @@ type
 
 		Driver: TITAudioDriver;
 
+		// callbacks
+		OnLockMixer:  TMixerBoolEvent;
+		OnOpenMixer:  TMixerOpenEvent; // 16000..64000, 256..8192
+		OnCloseMixer: TMixerDefaultEvent;
+		OnPlayback:   TMixerBoolEvent;
+
 		function  GetModuleType(Stream: TStream): TModuleType;
 		function  LoadFromStream(Stream: TStream): Boolean;
 		function  LoadFromFile(const Filename: String): Boolean;
@@ -580,22 +599,21 @@ type
 		procedure Update;
 		procedure FillAudioBuffer(Buffer: PInt16; NumSamples: Cardinal);
 
-		//procedure Close;
-		procedure Stop;
-		//procedure StopChannels;
-		procedure LockMixer;
-		procedure UnlockMixer;
-
 		//procedure PreviousOrder;
 		//procedure NextOrder;
 		function  Play(Order: Word = 0): Boolean;
+		procedure Stop;
 
-		//function  GetActiveVoices: Integer;
 		procedure FreeSong;
 
+		//function  GetActiveVoices: Integer;
 		//function  RenderToWAV(Filename: String): Boolean;
 
-		constructor Create(MixingFrequency: Cardinal = 44100; DriverType: TAudioDriverType = DRIVER_DEFAULT);
+		function  Init(DriverType: TAudioDriverType;
+		          MixingFrequency: Word = 44100;
+		          MixingBufferSize: Cardinal = 0): Boolean;
+
+		constructor Create;
 		destructor  Destroy; override;
 	end;
 
@@ -736,7 +754,8 @@ procedure TSample.ReleaseSample;
 var
 	B: Boolean;
 begin
-	//Module.LockMixer;
+	if Module <> nil then
+		Module.LockMixer;
 
 	for B in Boolean do
 	begin
@@ -744,7 +763,8 @@ begin
 		Data[B].Data := nil;
 	end;
 
-	//Module.UnlockMixer;
+	if Module <> nil then
+		Module.UnlockMixer;
 end;
 
 procedure TSample.Decompress16BitData(Dst: PInt16; Src: PByte; BlockLength: Cardinal);
@@ -1009,6 +1029,13 @@ begin
 	end;
 
 	Result := True;
+end;
+
+constructor TSample.Create(AModule: TITModule);
+begin
+	inherited Create;
+
+	Module := AModule;
 end;
 
 
@@ -5072,7 +5099,7 @@ begin
 		Offset := SmpPtrs[i] << 4;
 		if Offset = 0 then Continue;
 
-		Sam := TSample.Create;
+		Sam := TSample.Create(Self);
 		Samples[i].Free; // precaution
 		Samples[i] := Sam;
 
@@ -5457,7 +5484,7 @@ begin
 
 			Stream.Seek(SP + SmpOffset + 4, soBeginning); // skip unwanted stuff
 
-			Sam := TSample.Create;
+			Sam := TSample.Create(Self);
 			Samples[i].Free; // precaution
 			Samples[i] := Sam;
 
@@ -5706,16 +5733,6 @@ begin
 	end;
 end;
 
-procedure TITModule.LockMixer;
-begin
-	// TODO callback
-end;
-
-procedure TITModule.UnlockMixer;
-begin
-	// TODO callback
-end;
-
 procedure TITModule.Update;
 var
 	i: Integer;
@@ -5750,7 +5767,9 @@ end;
 
 procedure TITModule.FillAudioBuffer(Buffer: PInt16; NumSamples: Cardinal);
 begin
-	if (not Playing) {or (WAVRender_Flag)} or (Driver = nil) then
+	if Buffer = nil then Exit;
+
+	if (not Self.Playing) or (Driver = nil) then {or (WAVRender_Flag)}
 		FillDWord(Buffer, NumSamples, 0)
 	else
 		Driver.Mix(NumSamples, Buffer);
@@ -5808,6 +5827,9 @@ begin
 	end;
 
 	UnlockMixer;
+
+	if Assigned(OnPlayback) then
+		OnPlayback(Self, False);
 end;
 
 function TITModule.Play(Order: Word): Boolean;
@@ -5839,6 +5861,9 @@ begin
 		Playing := False;
 
 	Result := Playing;
+
+	if (Result) and (Assigned(OnPlayback)) then
+		OnPlayback(Self, True);
 end;
 
 procedure TITModule.FreeSong;
@@ -5868,7 +5893,7 @@ begin
 			FreeAndNil(Instruments[i]);
 end;
 
-constructor TITModule.Create(MixingFrequency: Cardinal; DriverType: TAudioDriverType);
+constructor TITModule.Create;
 var
 	i: Integer;
 begin
@@ -5900,22 +5925,22 @@ begin
 	EmptyPattern := TPattern.Create;
 
 	for i := 0 to MAX_SAMPLES-1 do
-		Samples[i] := TSample.Create;
+		Samples[i] := TSample.Create(Self);
 
 	for i := 0 to MAX_INSTRUMENTS-1 do
 		Instruments[i] := TInstrument.Create;
 
-	{
-	procedure LockMixer; // waits for the current mixing block to finish and disables further mixing
-	procedure UnlockMixer; // enables mixing again
-	function  OpenMixer(MixingFrequency, MixingBufferSize: Integer); // 16000..64000, 256..8192
-	procedure CloseMixer(void);
-	}
-
-	if Driver <> nil then
-		Driver.Free;
-
 	Driver := nil;
+end;
+
+function TITModule.Init(DriverType: TAudioDriverType;
+	MixingFrequency: Word; MixingBufferSize: Cardinal = 0): Boolean;
+begin
+	if Driver <> nil then
+	begin
+		CloseMixer;
+		FreeAndNil(Driver);
+	end;
 
 	if DriverType = DRIVER_DEFAULT then
 		DriverType := DRIVER_SB16MMX; // !!! update when adding better driver
@@ -5929,6 +5954,10 @@ begin
 	end;
 
 	Stop;
+
+	Result := (Driver <> nil);
+	if Result then
+		OpenMixer(MixingFrequency, MixingBufferSize);
 end;
 
 destructor TITModule.Destroy;
@@ -5939,6 +5968,7 @@ begin
 	EmptyPattern.Free;
 
 	Driver.Free;
+	CloseMixer;
 
 	inherited Destroy;
 end;
@@ -5947,6 +5977,7 @@ end;
 // ================================================================================================
 // instrument support
 // ================================================================================================
+
 
 function TITModule.UpdateEnvelope(var env: TEnv; var envState: TEnvState; SustainReleased: Boolean): Boolean;
 var
@@ -6383,5 +6414,38 @@ begin
 	Result := sc;
 end;
 
+
+// ================================================================================================
+// mixer callbacks
+// ================================================================================================
+
+
+function TITModule.OpenMixer(MixingFrequency, MixingBufferSize: Word): Boolean;
+begin
+	if Assigned(OnOpenMixer) then
+		Result := OnOpenMixer(Self, MixingFrequency, MixingBufferSize)
+	else
+		Result := False;
+end;
+
+// disable or enable mixing while buffer is being processed
+procedure TITModule.LockMixer;
+begin
+	if Assigned(OnLockMixer) then
+		OnLockMixer(Self, True);
+end;
+
+// enables mixing again
+procedure TITModule.UnlockMixer;
+begin
+	if Assigned(OnLockMixer) then
+		OnLockMixer(Self, False);
+end;
+
+procedure TITModule.CloseMixer;
+begin
+	if Assigned(OnCloseMixer) then
+		OnCloseMixer(Self);
+end;
 
 end.
