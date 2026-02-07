@@ -12,7 +12,7 @@ interface
 
 uses
 	Classes, SysUtils, Math,
-	IT.Module;
+	IT2play;
 
 type
 	{$IFDEF CPU64}
