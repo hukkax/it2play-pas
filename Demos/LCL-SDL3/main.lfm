@@ -1,0 +1,77 @@
+object Form1: TForm1
+  Left = 440
+  Height = 741
+  Top = 30
+  Width = 859
+  AllowDropFiles = True
+  Caption = 'Form1'
+  ClientHeight = 741
+  ClientWidth = 859
+  KeyPreview = True
+  OnDestroy = FormDestroy
+  OnDropFiles = FormDropFiles
+  OnKeyDown = FormKeyDown
+  OnShow = FormShow
+  object bPlay: TButton
+    Left = 12
+    Height = 59
+    Top = 13
+    Width = 141
+    Caption = 'Play'
+    TabOrder = 0
+    OnClick = bPlayClick
+  end
+  object pb: TPaintBox
+    Left = 440
+    Height = 112
+    Top = 24
+    Width = 400
+    Color = clBlack
+    ParentColor = False
+    OnPaint = pbPaint
+  end
+  object ListBox1: TListBox
+    Left = 16
+    Height = 626
+    Top = 91
+    Width = 400
+    Font.Name = 'Consolas'
+    Font.Pitch = fpFixed
+    Font.Quality = fqDraft
+    ItemHeight = 0
+    ParentFont = False
+    TabOrder = 1
+    OnClick = ListBox1Click
+  end
+  object Memo: TMemo
+    Left = 440
+    Height = 432
+    Top = 152
+    Width = 400
+    Font.CharSet = ANSI_CHARSET
+    Font.Height = -15
+    Font.Name = 'Consolas'
+    Font.Pitch = fpFixed
+    Font.Quality = fqDraft
+    ParentFont = False
+    ScrollBars = ssAutoVertical
+    TabOrder = 2
+    WordWrap = False
+  end
+  object pbSample: TPaintBox
+    Left = 440
+    Height = 112
+    Top = 605
+    Width = 400
+    Color = clBlack
+    ParentColor = False
+    OnPaint = pbSamplePaint
+  end
+  object Timer: TTimer
+    Enabled = False
+    Interval = 10
+    OnTimer = TimerTimer
+    Left = 196
+    Top = 25
+  end
+end
