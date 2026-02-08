@@ -77,6 +77,9 @@ begin
 			Info.Updating := False;
 		end;
 
+		// copy the filled audio buffer for visualization
+		CopyMemory(@Info.Data[0], @AudioBuffer[CurrBuffer][0], BufferSize*4);
+
 		WaveOutWrite(hWave, @WaveBlocks[CurrBuffer], SizeOf(WAVEHDR));
 
 		CurrBuffer += 1;

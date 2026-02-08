@@ -7,7 +7,6 @@ unit Main;
 // on Windows, use WinMM for audio output
 // on other systems, require SDL3 for this example
 // NOTE! Add SDL3_package to required packages in IDE if using SDL3
-// TODO: Show waveform while playing with WinMM driver
 
 {$IFDEF WINDOWS}
 	{$DEFINE AudioDeviceUnit  := IT.AudioDevice.WinMM}
