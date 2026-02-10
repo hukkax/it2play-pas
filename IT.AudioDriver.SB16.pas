@@ -483,10 +483,16 @@ begin
 		Inc(MixTransferOffset);
 
 		if Sample < -32768 then
-			Sample := -32768
+		begin
+			Sample := -32768;
+			Dec(MixVolume);
+		end
 		else
 		if Sample > +32767 then
+		begin
 			Sample := +32767;
+			Dec(MixVolume);
+		end;
 
 		AudioOut16^ := Sample;
 		Inc(AudioOut16);
@@ -499,8 +505,6 @@ procedure TITAudioDriver_SB16.Mix(NumSamples: Integer; AudioOut: PInt16);
 var
 	SamplesToTransfer: Integer;
 begin
-	MixVolume := Module.Header.MixVolume;
-
 	while NumSamples > 0 do
 	begin
 		if MixTransferRemaining = 0 then

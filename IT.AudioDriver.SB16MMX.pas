@@ -799,9 +799,11 @@ var
 	SampleShiftValue: Byte;
 	i, SamplesLeft: Integer;
 	Sample: Int32;
+	Clipped: Boolean;
 begin
 	SampleShiftValue := 13 - BoolToInt[Module.Header.Flags.ITF_STEREO];
 	SamplesLeft := IfThen(SamplesToOutput > 0, SamplesToOutput, BytesToMix);
+	Clipped := False;
 
 	for i := 0 to SamplesLeft*2 - 1 do
 	begin
@@ -809,13 +811,25 @@ begin
 		Inc(MixTransferOffset);
 
 		if Sample < -32768 then
-			Sample := -32768
+		begin
+			Sample := -32768;
+			Clipped := True;
+		end
 		else
 		if Sample > +32767 then
+		begin
 			Sample := +32767;
+			Clipped := True;
+		end;
 
 		AudioOut16^ := Sample;
 		Inc(AudioOut16);
+	end;
+
+	if Clipped then
+	begin
+		Dec(Module.Header.MixVolume);
+		SetMixVolume(Module.Header.MixVolume);
 	end;
 
 	Result := SamplesLeft;
@@ -825,8 +839,6 @@ procedure TITAudioDriver_SB16MMX.Mix(NumSamples: Integer; AudioOut: PInt16);
 var
 	SamplesToTransfer: Integer;
 begin
-	MixVolume := Module.Header.MixVolume;
-
 	while NumSamples > 0 do
 	begin
 		if MixTransferRemaining = 0 then
