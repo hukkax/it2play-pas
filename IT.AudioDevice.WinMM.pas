@@ -19,10 +19,10 @@ type
 	TITAudioDevice_WinMM = class (TITAudioDevice)
 	protected
 		// mixer callbacks
-		function  OpenMixer (Module: TITModule; MixingFrequency, MixingBufferSize: Cardinal): Boolean; override;
-		procedure LockMixer (Module: TITModule; Value: Boolean); override;
-		procedure CloseMixer(Module: TITModule); override;
-		procedure Playback  (Module: TITModule; Value: Boolean); override;
+		function  OpenMixer ({%H-}Module: TITModule; MixingFrequency, MixingBufferSize: Cardinal): Boolean; override;
+		procedure LockMixer ({%H-}Module: TITModule; {%H-}Value: Boolean); override;
+		procedure CloseMixer({%H-}Module: TITModule); override;
+		procedure Playback  ({%H-}Module: TITModule; {%H-}Value: Boolean); override;
 	public
 		constructor Create(Module: TITModule; SampleRate: Word = 44100); override;
 		destructor  Destroy; override;
@@ -43,7 +43,7 @@ var
 	WaveBlocks: array [0..MIX_BUF_NUM-1] of WAVEHDR;
 	hWave: HWAVEOUT;
 
-procedure AudioCallback(hwo: HWAVEOUT; uMsg: UINT; dwInstance, dwParam1, dwParam2: DWORD_PTR); stdcall;
+procedure AudioCallback({%H-}hwo: HWAVEOUT; uMsg: UINT; {%H-}dwInstance, {%H-}dwParam1, {%H-}dwParam2: DWORD_PTR); stdcall;
 begin
 	if uMsg = WOM_DONE then
 		ReleaseSemaphore(hAudioSem, 1, nil);
@@ -134,7 +134,7 @@ begin
 	end;
 
 	if (WaveOutOpen(@hWave, WAVE_MAPPER, @WaveFormat,
-	    DWORD_PTR(@AudioCallback), 0, CALLBACK_FUNCTION)) <> MMSYSERR_NOERROR then
+	    {%H-}DWORD_PTR(@AudioCallback), 0, CALLBACK_FUNCTION)) <> MMSYSERR_NOERROR then
 		goto omError;
 
 	// create semaphore for buffer fill requests
@@ -159,6 +159,7 @@ begin
 
 	MixerOpened := True;
 
+	ThreadID := 0;
 	hThread := BeginThread(@MixThread, Pointer(Buffer), ThreadID);
 	if hThread = 0 then goto omError;
 
