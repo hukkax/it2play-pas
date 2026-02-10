@@ -16,40 +16,59 @@ unit Main;
 	{$DEFINE TAudioDeviceType := TITAudioDevice_SDL3}
 {$ENDIF}
 
+{$WARN 5026 off : Value parameter "$1" is assigned but never used}
+{$WARN 5024 off : Parameter "$1" not used}
+
 interface
 
 uses
 	Classes, SysUtils, Forms, Controls, Graphics, Dialogs,
-	LCLType, StdCtrls, ExtCtrls,
+	LCLType, StdCtrls, ExtCtrls, ComCtrls,
 	AudioDeviceUnit, // <- macro!
 	IT2play;
 
 type
-	TForm1 = class(TForm)
+	TMainForm = class(TForm)
 		bPlay: TButton;
-		Timer: TTimer;
 		pb: TPaintBox;
-		ListBox1: TListBox;
+		lbSamples: TListBox;
 		Memo: TMemo;
 		pbSample: TPaintBox;
+		PageControl: TPageControl;
+		tsSamples: TTabSheet;
+		tsInstruments: TTabSheet;
+		tsPatterns: TTabSheet;
+		lbInstruments: TListBox;
+		lbPatterns: TListBox;
+		bPrevOrder: TButton;
+		bNextOrder: TButton;
+		Label1: TLabel;
+		Label3: TLabel;
+		Label2: TLabel;
 
 		procedure FormShow(Sender: TObject);
 		procedure FormDestroy(Sender: TObject);
 		procedure bPlayClick(Sender: TObject);
-		procedure TimerTimer(Sender: TObject);
 		procedure pbPaint(Sender: TObject);
-		procedure ListBox1Click(Sender: TObject);
+		procedure lbSamplesClick(Sender: TObject);
 		procedure pbSamplePaint(Sender: TObject);
 		procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
+		procedure lbPatternsClick(Sender: TObject);
+		procedure bPrevOrderClick(Sender: TObject);
+		procedure bNextOrderClick(Sender: TObject);
 	private
 		procedure LoadModule(const Filename: String);
+
+		// callback handlers
+		procedure OnRowChange(M: TITModule);
+		procedure OnBufferFilled(M: TITModule);
 	public
 		Module: TITModule;
 		Output: TAudioDeviceType; // <- macro!
 	end;
 
 var
-	Form1: TForm1;
+	MainForm: TMainForm;
 
 
 implementation
@@ -57,7 +76,7 @@ implementation
 {$R *.lfm}
 
 
-procedure TForm1.FormShow(Sender: TObject);
+procedure TMainForm.FormShow(Sender: TObject);
 begin
 	OnShow := nil;
 
@@ -69,15 +88,19 @@ begin
 
 	// initialize the module with defaults
 	Module.Init(DRIVER_DEFAULT, Output.Frequency);
+
+	// set up callbacks to display waveform/playback info
+	Module.OnBufferFilled := OnBufferFilled;
+	Module.OnRowChange    := OnRowChange;
 end;
 
-procedure TForm1.FormDestroy(Sender: TObject);
+procedure TMainForm.FormDestroy(Sender: TObject);
 begin
 	Module.Free;
 	Output.Free;
 end;
 
-procedure TForm1.bPlayClick(Sender: TObject);
+procedure TMainForm.bPlayClick(Sender: TObject);
 begin
 	if Module.Playing then
 	begin
@@ -89,21 +112,9 @@ begin
 	begin
 		bPlay.Caption := 'Stop';
 	end;
-
-	Timer.Enabled := Module.Playing;
 end;
 
-procedure TForm1.TimerTimer(Sender: TObject);
-begin
-	// display song progress
-	Caption := Format('Order: %d, Pattern: %d, Row: %d',
-		[Module.CurrentOrder, Module.CurrentPattern, Module.CurrentRow]);
-
-	// paint a waveform of outgoing audio
-	pb.Invalidate;
-end;
-
-procedure TForm1.FormDropFiles(Sender: TObject; const FileNames: array of string);
+procedure TMainForm.FormDropFiles(Sender: TObject; const FileNames: array of string);
 var
 	S: String;
 begin
@@ -112,38 +123,117 @@ begin
 		LoadModule(S);
 end;
 
-procedure TForm1.LoadModule(const Filename: String);
+procedure TMainForm.LoadModule(const Filename: String);
 var
 	i: Integer;
-	S: TSample;
+	S: String;
+	Sam: TSample;
+	Ins: TInstrument;
+	Pat: TPattern;
 begin
-	ListBox1.Items.Clear;
+	lbSamples.Items.Clear;
+	lbInstruments.Items.Clear;
+	lbPatterns.Items.Clear;
+	Memo.Lines.Clear;
+
+	// wait until audio output has finished processing
 
 	if Module.Playing then
 		while Output.Buffer.Updating do;
 
-	if not Module.LoadFromFile(Filename) then
+	// load in new module
+
+	if (Module.LoadFromFile(Filename)) and (Module.Header.PatNum > 0) then
 	begin
-		ShowMessage('ERROR: Could not load module!');
-		Exit;
+		S := TrimRight(Module.Header.SongName);
+		if S <> '' then S := S + ' ';
+		S := S + '(' + ExtractFileName(Filename) + ')';
+		Caption := 'IT2play - ' + S;
+
+		// if the orderlist is empty generate one from the patterns
+		if Module.Header.OrdNum = 0 then
+			Module.Header.OrdNum := 1;
+		if Module.Orders[0] = 255 then
+		begin
+			Module.Header.OrdNum := Module.Header.PatNum;
+			for i := 0 to Module.Header.OrdNum-1 do
+				Module.Orders[0] := i;
+		end;
+
+		// populate sample list
+		//
+		for i := 0 to Length(Module.Samples)-1 do
+		begin
+			Sam := Module.Samples[i];
+			if Sam <> nil then
+			begin
+				if (Sam.Length > 0) or (Sam.SampleName <> '') then
+					lbSamples.Items.AddObject('%.2d. %s', [i+1, Sam.SampleName], Sam);
+			end;
+		end;
+		if lbSamples.Items.Count > 0 then
+			lbSamples.ItemIndex := 0;
+
+		// populate instrument list
+		//
+		if Module.Header.Flags.ITF_INSTR_MODE then
+		begin
+			for i := 0 to Length(Module.Instruments)-1 do
+			begin
+				Ins := Module.Instruments[i];
+				if Ins <> nil then
+					lbInstruments.Items.AddObject('%.2d. %s', [i+1, Ins.InstrumentName], Ins);
+			end;
+			if lbInstruments.Items.Count > 0 then
+				lbInstruments.ItemIndex := 0;
+			tsInstruments.TabVisible := True;
+		end
+		else
+			tsInstruments.TabVisible := False;
+
+		// populate pattern list
+		//
+		for i := 0 to Module.Header.PatNum-1 do
+		begin
+			Pat := Module.Patterns[i];
+			if Pat <> nil then
+				lbPatterns.Items.AddObject('%.2d. Channels:%d Rows:%d', [i, Pat.GetChannelCount, Pat.Rows], Pat);
+		end;
+		if lbPatterns.Items.Count > 0 then
+			lbPatterns.ItemIndex := 0;
+
+		Memo.Lines.AddStrings(Module.SongMessage);
+
+		// load success, start playback
+		bPlay.Enabled := True;
+		bPlayClick(Self);
 	end
 	else
 	begin
-		bPlayClick(Self);
+		bPlay.Caption := '-';
+		bPlay.Enabled := False;
 	end;
-
-	for i := 0 to Length(Module.Samples)-1 do
-	begin
-		S := Module.Samples[i];
-		if S <> nil then
-			ListBox1.items.AddObject('%.2d. %s', [i+1, S.SampleName], S);
-	end;
-
-	ListBox1.ItemIndex := 0;
-	ListBox1Click(Self);
 end;
 
-procedure TForm1.pbPaint(Sender: TObject);
+procedure TMainForm.OnRowChange(M: TITModule);
+begin
+	// display song progress
+	Label1.Caption := Format('Order %d / %d',
+		[Module.CurrentOrder, Module.Header.OrdNum-1]);
+	Label2.Caption := Format('Pattern: %d.%.2d / %d',
+		[Module.CurrentPattern, Module.CurrentRow, Module.Header.PatNum-1]);
+	Label3.Caption := Format('Tempo/Speed: %d / %d',
+		[Module.Tempo, Module.CurrentSpeed]);
+//	Label4.Caption := Format('Active voices: %d', [Module.GetActiveVoices]);
+end;
+
+procedure TMainForm.OnBufferFilled(M: TITModule);
+begin
+	// paint a waveform of outgoing audio
+	pb.Invalidate;
+end;
+
+procedure TMainForm.pbPaint(Sender: TObject);
 var
 	X, Y, W, H: Integer;
 	P: PInt16;
@@ -156,7 +246,7 @@ begin
 	H := pb.ClientHeight;
 
 	pb.Canvas.PenPos := Point(0, H div 2);
-	pb.Canvas.Pen.Color := clWhite;
+	pb.Canvas.Pen.Color := RGBToColor(255, 210, 120);
 
 	// ugly!
 	if Module.Playing then
@@ -178,7 +268,7 @@ begin
 	end;
 end;
 
-procedure TForm1.pbSamplePaint(Sender: TObject);
+procedure TMainForm.pbSamplePaint(Sender: TObject);
 var
 	X, Y, W, H: Integer;
 	F, D: Double;
@@ -195,9 +285,9 @@ begin
 	F := 0;
 
 	pbSample.Canvas.PenPos := Point(0, H div 2);
-	pbSample.Canvas.Pen.Color := clWhite;
+	pbSample.Canvas.Pen.Color := clBtnText;
 
-	S := TSample(ListBox1.Items.Objects[ListBox1.ItemIndex]);
+	S := TSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
 	if (S = nil) or (S.Length < 2) or (not S.Flags.SMPF_ASSOCIATED_WITH_HEADER) then Exit;
 
 	if S.Flags.SMPF_16BIT then
@@ -227,7 +317,7 @@ begin
 	end;
 end;
 
-procedure TForm1.ListBox1Click(Sender: TObject);
+procedure TMainForm.lbSamplesClick(Sender: TObject);
 
 	function IfThen(B: Boolean; const sYes, sNo: String): String; inline;
 	begin
@@ -237,13 +327,17 @@ procedure TForm1.ListBox1Click(Sender: TObject);
 var
 	S: TSample;
 begin
+	// draw waveform
 	pbSample.Invalidate;
-	Memo.Lines.Clear;
 
-	S := TSample(ListBox1.Items.Objects[ListBox1.ItemIndex]);
+	Memo.Lines.Clear;
+	Memo.Lines.BeginUpdate;
+
+	S := TSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
 	if S = nil then Exit;
 
-	Memo.Lines.Add('[Module Flags]');
+	Memo.Lines.Add('[Module]');
+	Memo.Lines.Add(Format('Total Channels: %d', [Module.ChannelsUsed]));
 	Memo.Lines.Add(Format('Channels:       %s', [IfThen(Module.Header.Flags.ITF_STEREO,      'Stereo', 'Mono')]));
 	Memo.Lines.Add(Format('Ins/Smp:        %s', [IfThen(Module.Header.Flags.ITF_INSTR_MODE,  'Instruments', 'Samples')]));
 	Memo.Lines.Add(Format('Pitch slides:   %s', [IfThen(Module.Header.Flags.ITF_LINEAR_FRQ,  'Linear', 'Amiga')]));
@@ -251,7 +345,7 @@ begin
 	Memo.Lines.Add(Format('Compatible Gxx: %s', [IfThen(Module.Header.Flags.ITF_COMPAT_GXX,  'Yes', 'No')]));
 	Memo.Lines.Add('');
 
-	Memo.Lines.Add('[Sample %d]', [ListBox1.ItemIndex+1]);
+	Memo.Lines.Add('[Sample %d]', [lbSamples.ItemIndex+1]);
 
 	Memo.Lines.Add(Format('Length:     %d samples (%d bytes)', [S.Length, S.Length*(BoolToInt[S.Flags.SMPF_16BIT]+1)]));
 	Memo.Lines.Add(Format('Volume:     %d   (Glob: %d)', [S.Vol, S.GlobVol]));
@@ -272,7 +366,77 @@ begin
 		IfThen((S.Cvt and 4) <> 0, '(Delta encoded)', '')
 	]));
 	Memo.Lines.Add(Format('Associated with header: %s', [IfThen(S.Flags.SMPF_ASSOCIATED_WITH_HEADER, 'Yes', 'No')]));
+
+	Memo.Lines.EndUpdate;
 end;
+
+procedure TMainForm.lbPatternsClick(Sender: TObject);
+const
+	NoteNames  = 'CCDDEFFGGAAB';
+	NoteSharp  = '-#-#--#-#-#-';
+	NoteOctave   = '0123456789';
+var
+	Pat: TPattern;
+	P: TUnpackedPattern;
+	N: PUnpackedNote;
+	i, Chan, Row, NumChans, NumRows: Integer;
+	S, sNote: String;
+begin
+	Memo.Lines.Clear;
+	Memo.Lines.BeginUpdate;
+
+	Pat := TPattern(lbPatterns.Items.Objects[lbPatterns.ItemIndex]);
+	if Pat = nil then Exit;
+
+	P := Pat.Unpack;
+
+	NumChans := Pat.GetChannelCount;
+	NumRows  := Pat.Rows;
+
+	Memo.Lines.Add('[Pattern %d]', [lbPatterns.ItemIndex]);
+	Memo.Lines.Add('');
+
+	for Row := 0 to NumRows-1 do
+	begin
+		S := '';
+		for Chan := 0 to NumChans-1 do
+		begin
+			sNote := '---';
+			N := @P.Notes[Chan, Row];
+
+			case N.Note of
+				1..120:
+				begin
+					i := (N.Note-1) mod 12;
+					sNote[1] := NoteNames[i+1];
+					sNote[2] := NoteSharp[i+1];
+					sNote[3] := NoteOctave[(N.Note-1) div 12 + 1];
+				end;
+				254: sNote := '^^^';
+				255: sNote := '===';
+			end;
+
+			S := S + sNote + ' | ';
+		end;
+
+		Memo.Lines.Add(S);
+	end;
+
+	Memo.Lines.EndUpdate;
+end;
+
+procedure TMainForm.bPrevOrderClick(Sender: TObject);
+begin
+	if Module.Playing then
+		Module.PreviousOrder;
+end;
+
+procedure TMainForm.bNextOrderClick(Sender: TObject);
+begin
+	if Module.Playing then
+		Module.NextOrder;
+end;
+
 
 end.
 

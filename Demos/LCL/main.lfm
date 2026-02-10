@@ -1,77 +1,164 @@
-object Form1: TForm1
+object MainForm: TMainForm
   Left = 440
-  Height = 741
+  Height = 732
   Top = 30
-  Width = 859
+  Width = 855
   AllowDropFiles = True
-  Caption = 'Form1'
-  ClientHeight = 741
-  ClientWidth = 859
+  Caption = 'IT2play Demo'
+  ClientHeight = 732
+  ClientWidth = 855
   KeyPreview = True
-  LCLVersion = '4.0.0.4'
+  Position = poScreenCenter
   OnDestroy = FormDestroy
   OnDropFiles = FormDropFiles
   OnShow = FormShow
   object bPlay: TButton
     Left = 12
-    Height = 59
+    Height = 64
     Top = 13
-    Width = 141
+    Width = 117
     Caption = 'Play'
     TabOrder = 0
     OnClick = bPlayClick
   end
   object pb: TPaintBox
-    Left = 440
-    Height = 112
-    Top = 24
+    Left = 12
+    Height = 64
+    Top = 96
     Width = 400
-    Color = clBlack
+    Color = 3684408
     ParentColor = False
     OnPaint = pbPaint
   end
-  object ListBox1: TListBox
-    Left = 16
-    Height = 626
-    Top = 91
-    Width = 400
-    Font.Name = 'Consolas'
-    Font.Pitch = fpFixed
-    Font.Quality = fqDraft
-    ItemHeight = 0
-    ParentFont = False
-    TabOrder = 1
-    OnClick = ListBox1Click
-  end
   object Memo: TMemo
-    Left = 440
-    Height = 432
-    Top = 152
-    Width = 400
+    Left = 424
+    Height = 701
+    Top = 16
+    Width = 416
+    Anchors = [akTop, akLeft, akRight, akBottom]
     Font.CharSet = ANSI_CHARSET
     Font.Height = -15
     Font.Name = 'Consolas'
     Font.Pitch = fpFixed
     Font.Quality = fqDraft
     ParentFont = False
-    ScrollBars = ssAutoVertical
-    TabOrder = 2
+    ScrollBars = ssAutoBoth
+    TabOrder = 1
     WordWrap = False
   end
-  object pbSample: TPaintBox
-    Left = 440
-    Height = 112
-    Top = 605
+  object PageControl: TPageControl
+    Left = 12
+    Height = 541
+    Top = 176
     Width = 400
-    Color = clBlack
-    ParentColor = False
-    OnPaint = pbSamplePaint
+    ActivePage = tsSamples
+    Anchors = [akTop, akLeft, akBottom]
+    TabIndex = 0
+    TabOrder = 2
+    object tsSamples: TTabSheet
+      Caption = 'Samples'
+      ClientHeight = 508
+      ClientWidth = 392
+      object lbSamples: TListBox
+        Left = 0
+        Height = 380
+        Top = 0
+        Width = 392
+        Align = alClient
+        Font.Name = 'Consolas'
+        Font.Pitch = fpFixed
+        Font.Quality = fqDraft
+        ItemHeight = 0
+        ParentFont = False
+        TabOrder = 0
+        OnClick = lbSamplesClick
+      end
+      object pbSample: TPaintBox
+        Left = 0
+        Height = 128
+        Top = 380
+        Width = 392
+        Align = alBottom
+        Color = clBtnFace
+        ParentColor = False
+        OnPaint = pbSamplePaint
+      end
+    end
+    object tsInstruments: TTabSheet
+      Caption = 'Instruments'
+      ClientHeight = 508
+      ClientWidth = 392
+      object lbInstruments: TListBox
+        Left = 0
+        Height = 508
+        Top = 0
+        Width = 392
+        Align = alClient
+        Font.Name = 'Consolas'
+        Font.Pitch = fpFixed
+        Font.Quality = fqDraft
+        ItemHeight = 0
+        ParentFont = False
+        TabOrder = 0
+      end
+    end
+    object tsPatterns: TTabSheet
+      Caption = 'Patterns'
+      ClientHeight = 508
+      ClientWidth = 392
+      object lbPatterns: TListBox
+        Left = 0
+        Height = 508
+        Top = 0
+        Width = 392
+        Align = alClient
+        Font.Name = 'Consolas'
+        Font.Pitch = fpFixed
+        Font.Quality = fqDraft
+        ItemHeight = 0
+        ParentFont = False
+        TabOrder = 0
+        OnClick = lbPatternsClick
+      end
+    end
   end
-  object Timer: TTimer
-    Enabled = False
-    Interval = 10
-    OnTimer = TimerTimer
-    Left = 196
-    Top = 25
+  object bPrevOrder: TButton
+    Left = 144
+    Height = 30
+    Top = 13
+    Width = 54
+    Caption = '<<'
+    TabOrder = 3
+    OnClick = bPrevOrderClick
+  end
+  object bNextOrder: TButton
+    Left = 144
+    Height = 30
+    Top = 47
+    Width = 54
+    Caption = '>>'
+    TabOrder = 4
+    OnClick = bNextOrderClick
+  end
+  object Label1: TLabel
+    Left = 215
+    Height = 20
+    Top = 11
+    Width = 4
+    Caption = ' '
+  end
+  object Label3: TLabel
+    Left = 215
+    Height = 20
+    Top = 57
+    Width = 4
+    Caption = ' '
+  end
+  object Label2: TLabel
+    Left = 215
+    Height = 20
+    Top = 34
+    Width = 177
+    Caption = 'Drag''n''drop a song to play'
   end
 end
