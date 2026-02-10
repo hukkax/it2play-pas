@@ -50,13 +50,13 @@ const
 	MAX_SONGMSG_LENGTH = 8000;
 
 	SMPF_ASSOCIATED_WITH_HEADER = 1;
-	SMPF_16BIT = 2;
-	SMPF_STEREO = 4;
-	SMPF_COMPRESSED = 8;
-	SMPF_USE_LOOP = 16;
-	SMPF_USE_SUSTAINLOOP = 32;
-	SMPF_LOOP_PINGPONG = 64;
-	SMPF_SUSTAINLOOP_PINGPONG = 128;
+	SMPF_16BIT                  = 2;
+	SMPF_STEREO                 = 4;
+	SMPF_COMPRESSED             = 8;
+	SMPF_USE_LOOP               = 16;
+	SMPF_USE_SUSTAINLOOP        = 32;
+	SMPF_LOOP_PINGPONG          = 64;
+	SMPF_SUSTAINLOOP_PINGPONG   = 128;
 
 	MIDICOMMAND_START         = $0000;
 	MIDICOMMAND_STOP          = $0020;
@@ -68,6 +68,33 @@ const
 	MIDICOMMAND_BANKSELECT    = $00E0;
 	MIDICOMMAND_PROGRAMSELECT = $0100;
 	MIDICOMMAND_CHANGEPITCH   = $FFFF;
+
+	// Pattern unpacking
+	PP_NOTE              = 1;
+	PP_INSTRUMENT        = 2;
+	PP_VOLUME            = 4;
+	PP_COMMAND           = 8;
+	PP_MASK_NOTE         = 16;
+	PP_MASK_INSTRUMENT   = 32;
+	PP_MASK_VOLUME       = 64;
+	PP_MASK_COMMAND      = 128;
+	PP_NOTE_OFF          = 255;
+	PP_NOTE_CUT          = 254;
+
+	CMD_NONE = 0;
+	CMD_A = 01;  CMD_B = 02;
+	CMD_C = 03;  CMD_D = 04;
+	CMD_E = 05;  CMD_F = 06;
+	CMD_G = 07;  CMD_H = 08;
+	CMD_I = 09;  CMD_J = 10;
+	CMD_K = 11;  CMD_L = 12;
+	CMD_M = 13;  CMD_N = 14;
+	CMD_O = 15;  CMD_P = 16;
+	CMD_Q = 17;  CMD_R = 18;
+	CMD_S = 19;  CMD_T = 20;
+	CMD_U = 21;  CMD_V = 22;
+	CMD_W = 23;  CMD_X = 24;
+	CMD_Y = 25;  CMD_Z = 26;
 
 	// 8bb:
 	// Amount of extra bytes to allocate for every instrument sample,
@@ -100,10 +127,32 @@ type
 
 	TITModule = class;
 
+	TUnpackTempData = record
+		NotePackMask, Note, Effect, EffectValue: Byte;
+	end;
+
+	TUnpackedNote = record
+		Note,
+		Instrument,
+		Volume,
+		Effect,
+		EffectValue: Byte;
+	end;
+	PUnpackedNote = ^TUnpackedNote;
+
+	TUnpackedPattern = class
+		Channels,
+		Rows:     Word;
+		Notes:    array of array of TUnpackedNote;
+	end;
+
 	TPattern = class
 	public
 		Rows:       Word;
 		PackedData: array of Byte;
+
+		function    GetChannelCount: Word;
+		function    Unpack: TUnpackedPattern;
 	end;
 
 	TEnvNode = record
@@ -406,6 +455,8 @@ type
 	const
 		SlideTable: array[0..8] of Byte = ( 1, 4, 8, 16, 32, 64, 96, 128, 255 );
 	private
+		//RenderMode: (RENDER_NONE, RENDER_LENGTH, RENDER_SAMPLE, RENDER_FILE); // TODO
+
 		RandSeed1, RandSeed2: Word;
 
 		ChannelCountTable,
@@ -523,7 +574,6 @@ type
 
 		// MIDI
 		procedure SetDefaultMIDIDataArea;
-		//function GetMIDIDataArea: char ;
 		procedure MIDITranslate(hc: THostChannel; sc: TSlaveChannel; Input: Word);
 		procedure MIDISendFilter(hc: THostChannel; sc: TSlaveChannel; Data: Byte);
 
@@ -538,8 +588,8 @@ type
 		procedure InitPlayInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TInstrument);
 
 		//procedure PrepareWAVRender; // 8bb: added this
-		//procedure WAV_WriteHeader(FILE *f, int32_t frq)
-		//procedure void WAV_WriteEnd(FILE *f, uint32_t size)
+		//procedure WAV_WriteHeader(Stream: TStream; Freq: DWord);
+		//procedure WAV_WriteEnd(Stream: TStream; Size: Cardinal);
 
 		function  RandomNumber: Byte;
 
@@ -583,14 +633,24 @@ type
 		RowDelayOn, StopSong, PatternLooping: Boolean;
 		NumberOfRows, CurrentTick, CurrentSpeed, ProcessTick: Word;
 		Tempo, GlobalVolume: Word;
+		ChannelsUsed: Byte;
 
 		Driver: TITAudioDriver;
 
-		// callbacks
-		OnLockMixer:  TMixerBoolEvent;
-		OnOpenMixer:  TMixerOpenEvent; // 16000..64000, 256..8192
-		OnCloseMixer: TMixerDefaultEvent;
-		OnPlayback:   TMixerBoolEvent;
+		// mixer callbacks
+		//
+		OnLockMixer:    TMixerBoolEvent;
+		OnOpenMixer:    TMixerOpenEvent; // 16000..64000, 256..8192
+		OnCloseMixer:   TMixerDefaultEvent;
+		OnPlayback:     TMixerBoolEvent;
+		OnBufferFilled: TMixerDefaultEvent;
+
+		// player callbacks
+		//
+		//OnPlaySample: TMixerDefaultEvent; // TODO?
+		OnRowChange:    TMixerDefaultEvent;
+		OnOrderChange:  TMixerDefaultEvent;
+		OnTempoChange:  TMixerDefaultEvent;
 
 		function  GetModuleType(Stream: TStream): TModuleType;
 		function  LoadFromStream(Stream: TStream): Boolean;
@@ -599,14 +659,15 @@ type
 		procedure Update;
 		procedure FillAudioBuffer(Buffer: PInt16; NumSamples: Cardinal);
 
-		//procedure PreviousOrder;
-		//procedure NextOrder;
 		function  Play(Order: Word = 0): Boolean;
+		procedure StopChannels;
 		procedure Stop;
+		procedure PreviousOrder;
+		procedure NextOrder;
 
 		procedure FreeSong;
 
-		//function  GetActiveVoices: Integer;
+		function  GetActiveVoices: Word;
 		//function  RenderToWAV(Filename: String): Boolean;
 
 		function  Init(DriverType: TAudioDriverType;
@@ -1161,12 +1222,16 @@ procedure TITAudioDriver.SetTempo(Tempo: Byte);
 begin
 	if Tempo < LOWEST_BPM_POSSIBLE then
 		Tempo := LOWEST_BPM_POSSIBLE;
+
 	BytesToMix := ((MixSpeed * 2) + (MixSpeed div 2)) div Tempo;
+
+	if (Module <> nil) and (Assigned(Module.OnTempoChange)) then
+		Module.OnTempoChange(Module);
 end;
 
 procedure TITAudioDriver.SetMixVolume(Volume: Byte);
 begin
-	MixVolume := Volume;
+	MixVolume := Trunc(Volume * 0.8);
 	Module.RecalculateAllVolumes;
 end;
 
@@ -1533,14 +1598,6 @@ begin
 	Result := False; // 8bb: dupe not found
 end;
 
-function TITModule.GetPattern(Index: Word): TPattern;
-begin
-	Assert(Index < MAX_PATTERNS);
-	Result := Patterns[Index];
-	if Result.PackedData = nil then
-		Result := EmptyPattern;
-end;
-
 procedure TITModule.PreInitCommand(hc: THostChannel);
 var
 	Ins: TInstrument;
@@ -1613,7 +1670,7 @@ begin
 		chnNum := p^;
 		Inc(p);
 
-		if chnNum = 0  then
+		if chnNum = 0 then
 		begin
 			Dec(rowsTodo);
 			if rowsTodo = 0 then Break;
@@ -1622,31 +1679,31 @@ begin
 
 		hc := HostChannels[(chnNum and $7F) - 1];
 
-		if (chnNum and $80) <> 0 then
+		if (chnNum and 128) <> 0 then
 		begin
 			hc.NotePackMask := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 1) <> 0 then
+		if (hc.NotePackMask and PP_NOTE) <> 0 then
 		begin
 			hc.RawNote := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 2) <> 0 then
+		if (hc.NotePackMask and PP_INSTRUMENT) <> 0 then
 		begin
 			hc.Ins := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 4) <> 0 then
+		if (hc.NotePackMask and PP_VOLUME) <> 0 then
 		begin
 			hc.RawVolColumn := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 8) <> 0 then
+		if (hc.NotePackMask and PP_COMMAND) <> 0 then
 		begin
 			hc.OldCmd    := p^; Inc(p);
 			hc.OldCmdVal := p^; Inc(p);
@@ -1695,31 +1752,31 @@ begin
 
 		hc := HostChannels[(chnNum and $7F)-1];
 
-		if (chnNum and $80) <> 0 then
+		if (chnNum and 128) <> 0 then
 		begin
 			hc.NotePackMask := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 1) <> 0 then
+		if (hc.NotePackMask and PP_NOTE) <> 0 then
 		begin
 			hc.RawNote := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 2) <> 0 then
+		if (hc.NotePackMask and PP_INSTRUMENT) <> 0 then
 		begin
 			hc.Ins := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 4) <> 0 then
+		if (hc.NotePackMask and PP_VOLUME) <> 0 then
 		begin
 			hc.RawVolColumn := p^;
 			Inc(p);
 		end;
 
-		if (hc.NotePackMask and 8) <> 0 then
+		if (hc.NotePackMask and PP_COMMAND) <> 0 then
 		begin
 			hc.Cmd    := p^;
 			hc.OldCmd := p^;
@@ -1729,7 +1786,7 @@ begin
 			Inc(p);
 		end
 		else
-		if (hc.NotePackMask and 128) <> 0 then
+		if (hc.NotePackMask and PP_MASK_COMMAND) <> 0 then
 		begin
 			hc.Cmd    := hc.OldCmd;
 			hc.CmdVal := hc.OldCmdVal;
@@ -1744,6 +1801,166 @@ begin
 	end;
 
 	PatternOffset := p;
+end;
+
+function TPattern.GetChannelCount: Word;
+var
+	Row, Chan: Integer;
+	p: PByte;
+	chnNum, Mask: Byte;
+	NotePackMask: array of Byte;
+	HasData: Boolean;
+begin
+	Result := 0;
+
+	SetLength(NotePackMask{%H-}, MAX_HOST_CHANNELS);
+	FillByte(NotePackMask[0], MAX_HOST_CHANNELS, 0);
+
+	p := @PackedData[0];
+
+	for Row := 0 to Self.Rows-1 do
+	while True do
+	begin
+		chnNum := p^;
+		Inc(p);
+		if chnNum = 0 then Break; // end of row
+
+		Chan := (chnNum-1) and 63;
+		HasData := False;
+
+		if (chnNum and 128) <> 0 then // read mask
+		begin
+			Mask := p^;
+			NotePackMask[Chan] := Mask;
+			Inc(p);
+		end
+		else
+			Mask := NotePackMask[Chan];
+
+		if Mask and PP_NOTE <> 0 then  // read note
+		begin
+			HasData := True;
+			Inc(p);
+		end;
+		if Mask and PP_INSTRUMENT <> 0 then // read instrument
+		begin
+			HasData := True;
+			Inc(p);
+		end;
+		if Mask and PP_VOLUME <> 0 then // read volume
+		begin
+			HasData := True;
+			Inc(p);
+		end;
+		if Mask and PP_COMMAND <> 0 then // read effect
+		begin
+			HasData := True;
+			Inc(p, 2);
+		end;
+
+		if HasData then
+			if (Chan+1) > Result then
+				Result := Chan+1;
+	end;
+end;
+
+function TPattern.Unpack: TUnpackedPattern;
+var
+	Row, Chan, NumChannels: Integer;
+	p: PByte;
+	chnNum, Mask, nn: Byte;
+	Note: PUnpackedNote;
+	TempData: array of TUnpackTempData;
+begin
+	NumChannels := Self.GetChannelCount;
+	if NumChannels < 1 then Exit(nil);
+
+	Result := TUnpackedPattern.Create;
+	Result.Channels := NumChannels;
+	Result.Rows     := Self.Rows;
+
+	p := @Self.PackedData[0];
+
+	SetLength(Result.Notes, NumChannels, Rows);
+	SetLength(TempData{%H-}, NumChannels);
+
+	// zero out the result structures
+	for Chan := 0 to NumChannels-1 do
+	begin
+		TempData[Chan] := Default(TUnpackTempData);
+		for Row := 0 to Self.Rows-1 do
+			Result.Notes[Chan, Row] := Default(TUnpackedNote);
+	end;
+
+	for Row := 0 to Self.Rows-1 do
+	while True do
+	begin
+		chnNum := p^;
+		Inc(p);
+		if chnNum = 0 then Break; // No more!
+
+		Chan := (chnNum-1) and 63;
+		Mask := TempData[Chan].NotePackMask;
+
+		Note := @Result.Notes[Chan, Row];
+
+		if (chnNum and 128) <> 0 then
+		begin
+			Mask := p^;
+			TempData[Chan].NotePackMask := Mask;
+			Inc(p);
+		end;
+
+		if (Mask and PP_NOTE) <> 0 then
+		begin
+			nn := p^;
+			if nn <= 119 then Inc(nn); // C-0..B-9, change to 1-based
+			Note^.Note := nn;
+			TempData[Chan].Note := nn;
+			Inc(p);
+		end
+		else
+		if (Mask and PP_MASK_NOTE) <> 0 then
+		begin
+			Note^.Note := TempData[Chan].Note;
+		end;
+
+		if (Mask and PP_INSTRUMENT) <> 0 then
+		begin
+			Note^.Instrument := p^;
+			Inc(p);
+		end;
+
+		if (Mask and PP_VOLUME) <> 0 then
+		begin
+			Note^.Volume := p^;
+			Inc(p);
+		end;
+
+		if (Mask and PP_COMMAND) <> 0 then
+		begin
+			Note^.Effect := p^;
+			TempData[Chan].Effect := p^;
+			Inc(p);
+			Note^.EffectValue := p^;
+			TempData[Chan].EffectValue := p^;
+			Inc(p);
+		end
+		else
+		if (Mask and PP_MASK_COMMAND) <> 0 then
+		begin
+			Note^.Effect      := TempData[Chan].Effect;
+			Note^.EffectValue := TempData[Chan].EffectValue;
+		end
+	end;
+end;
+
+function TITModule.GetPattern(Index: Word): TPattern;
+begin
+	Assert(Index < MAX_PATTERNS);
+	Result := Patterns[Index];
+	if Result.PackedData = nil then
+		Result := EmptyPattern;
 end;
 
 // 8bb: I only ported the logic for "Play Song" mode (mode=2)
@@ -1800,14 +2017,25 @@ begin
 					end;
 				end;
 
-				CurrentOrder := NewOrder;
 				ProcessOrder := NewOrder;
+				if NewOrder <> CurrentOrder then
+				begin
+					CurrentOrder := NewOrder;
+					if Assigned(OnOrderChange) then
+						OnOrderChange(Self);
+				end;
 				NewRow := BreakRow;
 				BreakRow := 0;
 			end;
 
-			CurrentRow := NewRow;
 			ProcessRow := NewRow;
+			if NewRow <> CurrentRow then
+			begin
+				CurrentRow := NewRow;
+				if Assigned(OnRowChange) then
+					OnRowChange(Self);
+			end;
+
 			UpdateNoteData;
 		end
 		else
@@ -2743,14 +2971,14 @@ begin
 		begin
 			sc := hc.SlaveChannel;
 
-			if hc.TranslatedNote = 255 then // 8bb: note off
+			if hc.TranslatedNote = PP_NOTE_OFF then // 8bb: note off
 			begin
 				sc.Flags.SF_NOTE_OFF := True;
 				InitNoCommand11(hc, sc, hcFlags);
 				Exit;
 			end
 			else
-			if hc.TranslatedNote = 254 then // 8bb: note cut
+			if hc.TranslatedNote = PP_NOTE_CUT then // 8bb: note cut
 			begin
 				hcFlags.HF_CHAN_ON := False;
 				if (sc.Smp = 100) or (Driver.Flags.DF_USES_VOLRAMP) then
@@ -3050,13 +3278,13 @@ begin
 		else
 		if hc.Flags.HF_CHAN_ON then
 		begin
-			if hc.TranslatedNote = 255 then
+			if hc.TranslatedNote = PP_NOTE_OFF then
 			begin
 				sc.Flags.SF_NOTE_OFF := True;
 				GetLoopInformation(sc);
 			end
 			else
-			if hc.TranslatedNote = 254 then
+			if hc.TranslatedNote = PP_NOTE_CUT then
 			begin
 				hc.Flags.HF_CHAN_ON := False;
 				sc.Flags.WordAccess := 0;
@@ -5340,6 +5568,7 @@ begin
 
 		// load song message, if present
 		SongMessage.Clear;
+
 		if ((Header.Special and 1) <> 0) and (Header.MessageLength > 0) and (Header.MessageOffset > 0) then
 		begin
 			DebugInfo('Song message (' + Header.MessageLength.ToString +
@@ -5357,6 +5586,7 @@ begin
 
 		for i := 0 to Header.InsNum-1 do
 		begin
+			Instruments[i].Free;
 			Ins := TInstrument.Create;
 			Instruments[i] := Ins;
 
@@ -5678,7 +5908,8 @@ function TITModule.LoadFromStream(Stream: TStream): Boolean;
 const
 	mmcmpstr = 'ziRCONia';
 var
-	WasCompressed: Boolean = False;
+	i: Integer;
+	//WasCompressed: Boolean = False;
 	S: AnsiString;
 begin
 	Result := False;
@@ -5707,6 +5938,11 @@ begin
 
 		if Result then
 		begin
+			ChannelsUsed := 0;
+			for i := 0 to Header.PatNum-1 do
+				if Patterns[i] <> nil then
+					ChannelsUsed := Max(ChannelsUsed, Patterns[i].GetChannelCount);
+
 			Stop;
 			Driver.SetMixVolume(Header.MixVolume);
 			Driver.FixSamples;
@@ -5772,7 +6008,67 @@ begin
 	if (not Self.Playing) or (Driver = nil) then {or (WAVRender_Flag)}
 		FillDWord(Buffer, NumSamples, 0)
 	else
+	begin
 		Driver.Mix(NumSamples, Buffer);
+		if Assigned(OnBufferFilled) then
+			OnBufferFilled(Self);
+	end;
+end;
+
+procedure TITModule.StopChannels;
+var
+	i: Integer;
+	hc: THostChannel;
+	sc: TSlaveChannel;
+begin
+	LockMixer;
+
+	for i := 0 to MAX_HOST_CHANNELS-1 do
+	begin
+		hc := HostChannels[i];
+		hc.Flags.WordAccess := 0;
+		hc.PattLoopStartRow := 0;
+		hc.PattLoopCount   := 0;
+	end;
+
+	for i := 0 to MAX_SLAVE_CHANNELS-1 do
+	begin
+		sc := SlaveChannels[i];
+		sc.Flags.WordAccess := 0;
+		sc.Flags.SF_NOTE_STOP := True;
+	end;
+
+	UnlockMixer;
+end;
+
+procedure TITModule.PreviousOrder;
+begin
+	if (not Playing) or (CurrentOrder < 1) then Exit;
+
+	StopChannels;
+
+	LockMixer;
+	CurrentOrder -= 2;
+	ProcessOrder := CurrentOrder;
+	ProcessRow   := $FFFE;
+	CurrentTick  := 1;
+	RowDelay     := 1;
+	RowDelayOn   := False;
+	UnlockMixer;
+end;
+
+procedure TITModule.NextOrder;
+begin
+	if (not Playing) or (CurrentOrder >= 255) then Exit;
+
+	StopChannels;
+
+	LockMixer;
+	ProcessRow   := $FFFE;
+	CurrentTick  := 1;
+	RowDelay     := 1;
+	RowDelayOn   := False;
+	UnlockMixer;
 end;
 
 procedure TITModule.Stop;
@@ -5891,6 +6187,20 @@ begin
 	for i := 0 to MAX_INSTRUMENTS-1 do
 		if Instruments[i] <> nil then
 			FreeAndNil(Instruments[i]);
+end;
+
+function TITModule.GetActiveVoices: Word;
+var
+	i: Integer;
+	sc: TSlaveChannel;
+begin
+	Result := 0;
+	for i := 0 to MAX_SLAVE_CHANNELS-1 do
+	begin
+		sc := SlaveChannels[i];
+		if (sc.Flags.SF_CHAN_ON) and (not sc.Flags.SF_NOTE_STOP) then
+			Inc(Result);
+	end;
 end;
 
 constructor TITModule.Create;
