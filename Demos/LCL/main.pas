@@ -42,9 +42,18 @@ type
 		lbPatterns: TListBox;
 		bPrevOrder: TButton;
 		bNextOrder: TButton;
-		Label1: TLabel;
-		Label3: TLabel;
-		Label2: TLabel;
+		lOrder: TLabel;
+		lTempo: TLabel;
+		lPattern: TLabel;
+		TabSheet1: TTabSheet;
+		GroupBox1: TGroupBox;
+		MemoMod: TMemo;
+		sbMixVol: TScrollBar;
+		Label4: TLabel;
+		lMixVol: TLabel;
+		lVoices: TLabel;
+		cbStereo: TCheckBox;
+		sbPanSep: TScrollBar;
 
 		procedure FormShow(Sender: TObject);
 		procedure FormDestroy(Sender: TObject);
@@ -56,6 +65,10 @@ type
 		procedure lbPatternsClick(Sender: TObject);
 		procedure bPrevOrderClick(Sender: TObject);
 		procedure bNextOrderClick(Sender: TObject);
+		procedure sbMixVolChange(Sender: TObject);
+		procedure sbMixVolScroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
+		procedure cbStereoChange(Sender: TObject);
+		procedure sbPanSepScroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
 	private
 		procedure LoadModule(const Filename: String);
 
@@ -74,6 +87,12 @@ var
 implementation
 
 {$R *.lfm}
+
+
+function IfThen(B: Boolean; const sYes, sNo: String): String; inline;
+begin
+	if B then Result := sYes else Result := sNo;
+end;
 
 
 procedure TMainForm.FormShow(Sender: TObject);
@@ -139,7 +158,7 @@ begin
 	// wait until audio output has finished processing
 
 	if Module.Playing then
-		while Output.Buffer.Updating do;
+		Output.Lock;
 
 	// load in new module
 
@@ -202,7 +221,28 @@ begin
 		if lbPatterns.Items.Count > 0 then
 			lbPatterns.ItemIndex := 0;
 
-		Memo.Lines.AddStrings(Module.SongMessage);
+		with MemoMod do
+		begin
+			Lines.Clear;
+			Lines.Add(Format('Filename:       %s', [ExtractFilename(Filename)]));
+			Lines.Add(Format('Song title:     %s', [Module.Header.SongName]));
+			Lines.Add(Format('Total channels: %d', [Module.ChannelsUsed]));
+			Lines.Add(Format('Channels:       %s', [IfThen(Module.Header.Flags.ITF_STEREO,      'Stereo', 'Mono')]));
+			Lines.Add(Format('Ins/Smp:        %s', [IfThen(Module.Header.Flags.ITF_INSTR_MODE,  'Instruments', 'Samples')]));
+			Lines.Add(Format('Pitch slides:   %s', [IfThen(Module.Header.Flags.ITF_LINEAR_FRQ,  'Linear', 'Amiga')]));
+			Lines.Add(Format('Old effects:    %s', [IfThen(Module.Header.Flags.ITF_OLD_EFFECTS, 'Yes', 'No')]));
+			Lines.Add(Format('Compatible Gxx: %s', [IfThen(Module.Header.Flags.ITF_COMPAT_GXX,  'Yes', 'No')]));
+
+			if Module.Header.MessageLength > 0 then
+			begin
+				Lines.Add('Song message:');
+				Lines.AddStrings(Module.SongMessage);
+			end;
+		end;
+
+		sbMixVol.Position := Module.MixingVolume;
+		sbPanSep.Position := Module.Header.PanSep;
+		cbStereo.Checked  := Module.Header.Flags.ITF_STEREO;
 
 		// load success, start playback
 		bPlay.Enabled := True;
@@ -213,18 +253,23 @@ begin
 		bPlay.Caption := '-';
 		bPlay.Enabled := False;
 	end;
+
+	Output.Unlock;
 end;
 
 procedure TMainForm.OnRowChange(M: TITModule);
 begin
 	// display song progress
-	Label1.Caption := Format('Order %d / %d',
+	lOrder.Caption := Format('Order %d / %d',
 		[Module.CurrentOrder, Module.Header.OrdNum-1]);
-	Label2.Caption := Format('Pattern: %d.%.2d / %d',
+	lPattern.Caption := Format('Pattern: %d.%.2d / %d',
 		[Module.CurrentPattern, Module.CurrentRow, Module.Header.PatNum-1]);
-	Label3.Caption := Format('Tempo/Speed: %d / %d',
+	lTempo.Caption := Format('Tempo/Speed: %d / %d',
 		[Module.Tempo, Module.CurrentSpeed]);
-//	Label4.Caption := Format('Active voices: %d', [Module.GetActiveVoices]);
+	lVoices.Caption := Format('Active voices: %d', [Module.GetActiveVoices]);
+
+	if Module.MixingVolume <> sbMixVol.Position then
+		sbMixVol.Position := Module.MixingVolume;
 end;
 
 procedure TMainForm.OnBufferFilled(M: TITModule);
@@ -251,9 +296,7 @@ begin
 	// ugly!
 	if Module.Playing then
 	begin
-		if Output.Buffer.Updating then Exit;
-
-		Output.Buffer.Updating := True;
+		Output.Lock;
 
 		P := @Output.Buffer.Data[0];
 
@@ -264,7 +307,7 @@ begin
 			Inc(P, 2);
 		end;
 
-		Output.Buffer.Updating := False;
+		Output.Unlock;
 	end;
 end;
 
@@ -318,12 +361,6 @@ begin
 end;
 
 procedure TMainForm.lbSamplesClick(Sender: TObject);
-
-	function IfThen(B: Boolean; const sYes, sNo: String): String; inline;
-	begin
-		if B then Result := sYes else Result := sNo;
-	end;
-
 var
 	S: TSample;
 begin
@@ -335,15 +372,6 @@ begin
 
 	S := TSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
 	if S = nil then Exit;
-
-	Memo.Lines.Add('[Module]');
-	Memo.Lines.Add(Format('Total Channels: %d', [Module.ChannelsUsed]));
-	Memo.Lines.Add(Format('Channels:       %s', [IfThen(Module.Header.Flags.ITF_STEREO,      'Stereo', 'Mono')]));
-	Memo.Lines.Add(Format('Ins/Smp:        %s', [IfThen(Module.Header.Flags.ITF_INSTR_MODE,  'Instruments', 'Samples')]));
-	Memo.Lines.Add(Format('Pitch slides:   %s', [IfThen(Module.Header.Flags.ITF_LINEAR_FRQ,  'Linear', 'Amiga')]));
-	Memo.Lines.Add(Format('Old effects:    %s', [IfThen(Module.Header.Flags.ITF_OLD_EFFECTS, 'Yes', 'No')]));
-	Memo.Lines.Add(Format('Compatible Gxx: %s', [IfThen(Module.Header.Flags.ITF_COMPAT_GXX,  'Yes', 'No')]));
-	Memo.Lines.Add('');
 
 	Memo.Lines.Add('[Sample %d]', [lbSamples.ItemIndex+1]);
 
@@ -435,6 +463,34 @@ procedure TMainForm.bNextOrderClick(Sender: TObject);
 begin
 	if Module.Playing then
 		Module.NextOrder;
+end;
+
+procedure TMainForm.sbMixVolChange(Sender: TObject);
+begin
+	lMixVol.Caption := Module.MixingVolume.ToString;
+end;
+
+procedure TMainForm.sbMixVolScroll(Sender: TObject; ScrollCode: TScrollCode;
+	var ScrollPos: Integer);
+begin
+	Output.Lock;
+	Module.MixingVolume := ScrollPos;
+	Output.Unlock;
+end;
+
+procedure TMainForm.cbStereoChange(Sender: TObject);
+begin
+	Output.Lock;
+	Module.Header.Flags.ITF_STEREO := cbStereo.Checked;
+	Output.Unlock;
+end;
+
+procedure TMainForm.sbPanSepScroll(Sender: TObject; ScrollCode: TScrollCode;
+	var ScrollPos: Integer);
+begin
+	Output.Lock;
+	Module.Header.PanSep := ScrollPos;
+	Output.Unlock;
 end;
 
 
