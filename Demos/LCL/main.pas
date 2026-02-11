@@ -241,7 +241,7 @@ begin
 		end;
 
 		sbMixVol.Position := Module.MixingVolume;
-		sbPanSep.Position := Module.Header.PanSep;
+		sbPanSep.Position := Module.PanSeparation;
 		cbStereo.Checked  := Module.Header.Flags.ITF_STEREO;
 
 		// load success, start playback
@@ -465,6 +465,12 @@ begin
 		Module.NextOrder;
 end;
 
+procedure TMainForm.cbStereoChange(Sender: TObject);
+begin
+	Module.Driver.WaitFor;
+	Module.Header.Flags.ITF_STEREO := cbStereo.Checked;
+end;
+
 procedure TMainForm.sbMixVolChange(Sender: TObject);
 begin
 	lMixVol.Caption := Module.MixingVolume.ToString;
@@ -473,24 +479,13 @@ end;
 procedure TMainForm.sbMixVolScroll(Sender: TObject; ScrollCode: TScrollCode;
 	var ScrollPos: Integer);
 begin
-	Output.Lock;
 	Module.MixingVolume := ScrollPos;
-	Output.Unlock;
-end;
-
-procedure TMainForm.cbStereoChange(Sender: TObject);
-begin
-	Output.Lock;
-	Module.Header.Flags.ITF_STEREO := cbStereo.Checked;
-	Output.Unlock;
 end;
 
 procedure TMainForm.sbPanSepScroll(Sender: TObject; ScrollCode: TScrollCode;
 	var ScrollPos: Integer);
 begin
-	Output.Lock;
-	Module.Header.PanSep := ScrollPos;
-	Output.Unlock;
+	Module.PanSeparation := ScrollPos;
 end;
 
 

@@ -24,6 +24,9 @@ type
 		procedure CloseMixer(Module: TITModule); override;
 		procedure Playback  (Module: TITModule; Value: Boolean); override;
 	public
+		procedure   Lock;   override;
+		procedure   Unlock; override;
+
 		constructor Create(Module: TITModule; SampleRate: Word = 44100); override;
 		destructor  Destroy; override;
 	end;
@@ -31,28 +34,48 @@ type
 
 implementation
 
+var
+	MixerBusy:    Boolean = False;
+	EnableMixing: Boolean = False;
 
 procedure AudioCallback(userdata: Pointer; stream: PSDL_AudioStream; additional_amount, total_amount: Longint); cdecl;
 var
 	Info: TITAudioDeviceBuffer;
 begin
-	Info := TITAudioDeviceBuffer(userdata);
-	if Info <> nil then
+	if not EnableMixing then
 	begin
-		while Info.Updating do; // safety - the buffer may be accessed by another thread at the moment
-		Info.Updating := True;
-
-		if Length(Info.Data) <= total_amount then
-			SetLength(Info.Data, total_amount+1);
-
-		Info.Module.FillAudioBuffer(@Info.Data[0], total_amount div 4); // stereo 16-bit signed samples
-		SDL_PutAudioStreamData(stream, @Info.Data[0], total_amount);
-
-		Info.Updating := False;
+		MixerBusy := False;
+		Exit;
 	end;
+
+	Info := TITAudioDeviceBuffer(userdata);
+	if (Info = nil) or (Info.Module = nil) then Exit;
+
+	while MixerBusy do; // safety - the buffer may be accessed by another thread at the moment
+
+	MixerBusy := True;
+
+	if Length(Info.Data) <= total_amount then
+		SetLength(Info.Data, total_amount+1);
+
+	Info.Module.FillAudioBuffer(@Info.Data[0], total_amount div 4); // stereo 16-bit signed samples
+	SDL_PutAudioStreamData(stream, @Info.Data[0], total_amount);
+
+	MixerBusy := False;
 end;
 
 { TITAudioDevice }
+
+procedure TITAudioDevice_SDL3.Lock;
+begin
+	EnableMixing := False;
+	while MixerBusy do;
+end;
+
+procedure TITAudioDevice_SDL3.Unlock;
+begin
+	EnableMixing := True;
+end;
 
 function TITAudioDevice_SDL3.OpenMixer(Module: TITModule;
 	MixingFrequency, MixingBufferSize: Cardinal): Boolean;
@@ -79,15 +102,16 @@ begin
 	end;
 
 	Result := (Audio <> nil);
+	EnableMixing := Result;
 end;
 
 procedure TITAudioDevice_SDL3.LockMixer(Module: TITModule; Value: Boolean);
 begin
 	case Value of
 		// wait for the current mixing block to finish and disable further mixing
-		True:  SDL_LockAudioStream(Audio);
+		True:  begin Lock;   SDL_LockAudioStream(Audio); end;
 		// enable mixing again
-		False: SDL_UnlockAudioStream(Audio);
+		False: begin Unlock; SDL_UnlockAudioStream(Audio); end;
 	end;
 end;
 

@@ -14,7 +14,6 @@ uses
 type
 	TITAudioDeviceBuffer = class
 		Module:     TITModule;
-		Updating:   Boolean;
 		SampleRate: Word;
 		Data:       array of Byte;
 	end;

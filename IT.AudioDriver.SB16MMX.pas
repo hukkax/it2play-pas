@@ -797,6 +797,9 @@ procedure TITAudioDriver_SB16MMX.Mix(NumSamples: Integer; AudioOut: PInt16);
 var
 	SamplesToTransfer: Integer;
 begin
+	WaitFor;
+	Busy := True;
+
 	while NumSamples > 0 do
 	begin
 		if MixTransferRemaining = 0 then
@@ -819,6 +822,8 @@ begin
 		MixTransferRemaining -= SamplesToTransfer;
 		NumSamples -= SamplesToTransfer;
 	end;
+
+	Busy := False;
 end;
 
 // Fixes sample end bytes for interpolation (yes, we have room after the data).
@@ -833,6 +838,8 @@ var
 	byte1, byte2: Int8;
 	Sample16Bit, HasLoop: Boolean;
 begin
+	Busy := True;
+
 	for i := 0 to Module.Header.SmpNum-1 do
 	begin
 		Sample := Module.Samples[i];
@@ -872,6 +879,8 @@ begin
 		smp8Ptr^ := byte1; Inc(smp8Ptr);
 		smp8Ptr^ := byte2; Inc(smp8Ptr);
 	end;
+
+	Busy := False;
 end;
 
 constructor TITAudioDriver_SB16MMX.Create(AModule: TITModule; MixingFrequency: Integer);

@@ -40,17 +40,21 @@ const
 var
 	MixerOpened, MixerBusy, MixerLocked: Boolean;
 	CurrBuffer: Byte;
-	AudioBuffer: array[0..MIX_BUF_NUM-1] of array of Byte;
 	BufferSize: Integer;
-	hThread, hAudioSem: THandle;
-	WaveBlocks: array [0..MIX_BUF_NUM-1] of WAVEHDR;
+
 	hWave: HWAVEOUT;
+	hThread, hAudioSem: THandle;
+
+	WaveBlocks: array [0..MIX_BUF_NUM-1] of WAVEHDR;
+	AudioBuffer: array[0..MIX_BUF_NUM-1] of array of Byte;
+
 
 procedure AudioCallback({%H-}hwo: HWAVEOUT; uMsg: UINT; {%H-}dwInstance, {%H-}dwParam1, {%H-}dwParam2: DWORD_PTR); stdcall;
 begin
 	if uMsg = WOM_DONE then
 		ReleaseSemaphore(hAudioSem, 1, nil);
 end;
+
 
 function MixThread(Buf: Pointer): Ptrint;
 var
@@ -62,26 +66,20 @@ begin
 	while MixerOpened do
 	begin
 		Info := TITAudioDeviceBuffer(Buf);
+		if (Info = nil) or (Info.Module = nil) then Exit;
 
-		if Info = nil then Exit;
-		if Info.Module = nil then Exit;
-
-		if not MixerLocked then
+		if (not MixerLocked) and (Info.Module.Playing) then
 		begin
-			Info.Updating := True;
 			MixerBusy := True;
-
-			if Info.Module.Playing then
-				Info.Module.FillAudioBuffer(@AudioBuffer[CurrBuffer][0], BufferSize)
-			else
-				FillDWord(AudioBuffer[CurrBuffer][0], BufferSize, 0);
-
-			MixerBusy := False;
-			Info.Updating := False;
-		end;
+			Info.Module.FillAudioBuffer(@AudioBuffer[CurrBuffer][0], BufferSize);
+		end
+		else
+			FillDWord(AudioBuffer[CurrBuffer][0], BufferSize, 0);
 
 		// copy the filled audio buffer for visualization
 		CopyMemory(@Info.Data[0], @AudioBuffer[CurrBuffer][0], BufferSize*4);
+
+		MixerBusy := False;
 
 		WaveOutWrite(hWave, @WaveBlocks[CurrBuffer], SizeOf(WAVEHDR));
 

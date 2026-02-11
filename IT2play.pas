@@ -399,6 +399,7 @@ type
 		// for SB16/"SB16 MMX"/"WAV writer".
 		//
 		function  PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte): Integer;
+
 		procedure UpdateNoLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
 		procedure UpdateForwardsLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
 		procedure UpdatePingPongLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
@@ -407,6 +408,7 @@ type
 
 		Flags: TITAudioDriverFlags;
 
+		Busy: Boolean;
 		NumChannels: Cardinal;
 		FilterParameters: array [0..127] of Byte;
 		MixMode, MixSpeed: Cardinal;
@@ -415,6 +417,7 @@ type
 		BytesToMix, MixTransferRemaining, MixTransferOffset: Integer;
 		MixBuffer: array of Int32;
 
+		procedure WaitFor; inline;
 		procedure MixSamples; virtual; abstract;
 		procedure SetTempo(Tempo: Byte); virtual;
 		procedure SetMixVolume(Volume: Byte); virtual;
@@ -610,6 +613,7 @@ type
 		procedure UnlockMixer;
 		procedure CloseMixer;
 		procedure SetMixingVolume(Value: Byte);
+		procedure SetPanSeparation(Value: Byte);
 	public
 		Header: TITHeader;
 
@@ -675,7 +679,8 @@ type
 		          MixingFrequency: Word = 44100;
 		          MixingBufferSize: Cardinal = 0): Boolean;
 
-		property MixingVolume: Byte read Header.MixVolume write SetMixingVolume;
+		property MixingVolume:  Byte read Header.MixVolume write SetMixingVolume;
+		property PanSeparation: Byte read Header.PanSep    write SetPanSeparation;
 
 		constructor Create;
 		destructor  Destroy; override;
@@ -1259,6 +1264,11 @@ begin
 	end;
 end;
 
+procedure TITAudioDriver.WaitFor;
+begin
+	while Busy do;
+end;
+
 procedure TITAudioDriver.SetTempo(Tempo: Byte);
 begin
 	if Tempo < LOWEST_BPM_POSSIBLE then
@@ -1278,6 +1288,7 @@ end;
 
 procedure TITAudioDriver.ResetMixer;
 begin
+	WaitFor;
 	MixTransferRemaining := 0;
 	MixTransferOffset := 0;
 	SetMixVolume(Module.Header.MixVolume);
@@ -6051,6 +6062,7 @@ begin
 	else
 	begin
 		Driver.Mix(NumSamples, Buffer);
+
 		if Assigned(OnBufferFilled) then
 			OnBufferFilled(Self);
 	end;
@@ -6807,4 +6819,14 @@ begin
 		Driver.SetMixVolume(Value);
 end;
 
+procedure TITModule.SetPanSeparation(Value: Byte);
+begin
+	if Value > 128 then Value := 128;
+	if Driver <> nil then
+		Driver.WaitFor;
+	Header.PanSep := Value;
+end;
+
+
 end.
+
