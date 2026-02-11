@@ -30,6 +30,9 @@ type
 		Buffer:     TITAudioDeviceBuffer;
 		Frequency:  Word;
 
+		procedure   Lock;   virtual; abstract;
+		procedure   Unlock; virtual; abstract;
+
 		constructor Create(Module: TITModule; SampleRate: Word = 44100); virtual;
 		destructor  Destroy; override;
 	end;

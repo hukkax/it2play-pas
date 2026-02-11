@@ -24,6 +24,9 @@ type
 		procedure CloseMixer({%H-}Module: TITModule); override;
 		procedure Playback  ({%H-}Module: TITModule; {%H-}Value: Boolean); override;
 	public
+		procedure   Lock;   override;
+		procedure   Unlock; override;
+
 		constructor Create(Module: TITModule; SampleRate: Word = 44100); override;
 		destructor  Destroy; override;
 	end;
@@ -169,19 +172,24 @@ omError:
 	CloseMixer(Module);
 end;
 
+procedure TITAudioDevice_WinMM.Lock;
+begin
+	MixerLocked := True;
+	while MixerBusy do;
+end;
+
+procedure TITAudioDevice_WinMM.Unlock;
+begin
+	MixerBusy   := False;
+	MixerLocked := False;
+end;
+
 procedure TITAudioDevice_WinMM.LockMixer(Module: TITModule; Value: Boolean);
 begin
 	if Value then
-	begin
-		MixerLocked := True;
-		while MixerBusy do;
-	end
+		Lock
 	else
-	begin
-		MixerBusy   := False;
-		MixerLocked := False;
-	end;
-
+		Unlock;
 end;
 
 procedure TITAudioDevice_WinMM.CloseMixer(Module: TITModule);
