@@ -36,7 +36,6 @@ type
 		procedure M32Mix16IS(sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal);
 	public
 		procedure MixSamples; override;
-		function  PostMix(AudioOut16: PInt16; SamplesToOutput: Integer): Integer; override;
 		procedure Mix(NumSamples: Integer; AudioOut: PInt16); override;
 		procedure FixSamples; override;
 
@@ -468,39 +467,6 @@ begin
 	end;
 end;
 
-function TITAudioDriver_SB16.PostMix(AudioOut16: PInt16; SamplesToOutput: Integer): Integer;
-var
-	SampleShiftValue: Byte;
-	i, SamplesLeft: Integer;
-	Sample: Int32;
-begin
-	SampleShiftValue := 14 - BoolToInt[Module.Header.Flags.ITF_STEREO];
-	SamplesLeft := IfThen(SamplesToOutput > 0, SamplesToOutput, BytesToMix);
-
-	for i := 0 to SamplesLeft*2 - 1 do
-	begin
-		Sample := SarLongint(MixBuffer[MixTransferOffset], SampleShiftValue);
-		Inc(MixTransferOffset);
-
-		if Sample < -32768 then
-		begin
-			Sample := -32768;
-			Dec(MixVolume);
-		end
-		else
-		if Sample > +32767 then
-		begin
-			Sample := +32767;
-			Dec(MixVolume);
-		end;
-
-		AudioOut16^ := Sample;
-		Inc(AudioOut16);
-	end;
-
-	Result := SamplesLeft;
-end;
-
 procedure TITAudioDriver_SB16.Mix(NumSamples: Integer; AudioOut: PInt16);
 var
 	SamplesToTransfer: Integer;
@@ -518,7 +484,10 @@ begin
 		if SamplesToTransfer > MixTransferRemaining then
 			SamplesToTransfer := MixTransferRemaining;
 
-		PostMix(AudioOut, SamplesToTransfer);
+		PostMix(AudioOut,
+			IfThen(SamplesToTransfer > 0, SamplesToTransfer, BytesToMix),
+			IfThen(Module.Header.Flags.ITF_STEREO, 13, 14));
+
 		AudioOut += SamplesToTransfer * 2;
 
 		MixTransferRemaining -= SamplesToTransfer;
