@@ -398,6 +398,7 @@ type
 		// the sampling position instead of doing actual mixing. They are the same
 		// for SB16/"SB16 MMX"/"WAV writer".
 		//
+		function  PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte): Integer;
 		procedure UpdateNoLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
 		procedure UpdateForwardsLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
 		procedure UpdatePingPongLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
@@ -418,7 +419,6 @@ type
 		procedure SetTempo(Tempo: Byte); virtual;
 		procedure SetMixVolume(Volume: Byte); virtual;
 		procedure ResetMixer; virtual;
-		function  PostMix(AudioOut16: PInt16; SamplesToOutput: Integer): Integer; virtual; abstract;
 		procedure Mix(NumSamples: Integer; AudioOut: PInt16); virtual; abstract;
 		procedure FixSamples; virtual; abstract;
 
@@ -609,6 +609,7 @@ type
 		procedure LockMixer;
 		procedure UnlockMixer;
 		procedure CloseMixer;
+		procedure SetMixingVolume(Value: Byte);
 	public
 		Header: TITHeader;
 
@@ -673,6 +674,8 @@ type
 		function  Init(DriverType: TAudioDriverType;
 		          MixingFrequency: Word = 44100;
 		          MixingBufferSize: Cardinal = 0): Boolean;
+
+		property MixingVolume: Byte read Header.MixVolume write SetMixingVolume;
 
 		constructor Create;
 		destructor  Destroy; override;
@@ -1105,6 +1108,44 @@ end;
 // ================================================================================================
 
 
+function TITAudioDriver.PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte): Integer;
+var
+	i: Integer;
+	Clipped: Boolean;
+	Sample: Int32;
+begin
+	Clipped := False;
+
+	for i := 0 to SamplesLeft*2 - 1 do
+	begin
+		Sample := SarLongint(MixBuffer[MixTransferOffset], SampleShiftValue);
+		Inc(MixTransferOffset);
+
+		if Sample < -32768 then
+		begin
+			Sample := -32768;
+			Clipped := True;
+		end
+		else
+		if Sample > +32767 then
+		begin
+			Sample := +32767;
+			Clipped := True;
+		end;
+
+		AudioOut16^ := Sample;
+		Inc(AudioOut16);
+	end;
+
+	if Clipped then
+	begin
+		Dec(Module.Header.MixVolume);
+		SetMixVolume(Module.Header.MixVolume);
+	end;
+
+	Result := SamplesLeft;
+end;
+
 // TODO remove unnecessary code duplication
 
 procedure TITAudioDriver.UpdateNoLoop(sc: TSlaveChannel; NumSamples: Cardinal);
@@ -1231,7 +1272,7 @@ end;
 
 procedure TITAudioDriver.SetMixVolume(Volume: Byte);
 begin
-	MixVolume := Trunc(Volume * 0.8);
+	MixVolume := Volume;
 	Module.RecalculateAllVolumes;
 end;
 
@@ -5944,7 +5985,7 @@ begin
 					ChannelsUsed := Max(ChannelsUsed, Patterns[i].GetChannelCount);
 
 			Stop;
-			Driver.SetMixVolume(Header.MixVolume);
+			MixingVolume := Header.MixVolume;
 			Driver.FixSamples;
 		end;
 	end;
@@ -6756,6 +6797,14 @@ procedure TITModule.CloseMixer;
 begin
 	if Assigned(OnCloseMixer) then
 		OnCloseMixer(Self);
+end;
+
+procedure TITModule.SetMixingVolume(Value: Byte);
+begin
+	if Value > 128 then Value := 128;
+	Header.MixVolume := Value;
+	if Driver <> nil then
+		Driver.SetMixVolume(Value);
 end;
 
 end.
