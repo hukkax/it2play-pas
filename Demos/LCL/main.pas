@@ -54,6 +54,9 @@ type
 		lVoices: TLabel;
 		cbStereo: TCheckBox;
 		sbPanSep: TScrollBar;
+		cmbDriver: TComboBox;
+		Label1: TLabel;
+		Button1: TButton;
 
 		procedure FormShow(Sender: TObject);
 		procedure FormDestroy(Sender: TObject);
@@ -69,6 +72,8 @@ type
 		procedure sbMixVolScroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
 		procedure cbStereoChange(Sender: TObject);
 		procedure sbPanSepScroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
+		procedure cmbDriverChange(Sender: TObject);
+		procedure Button1Click(Sender: TObject);
 	private
 		procedure LoadModule(const Filename: String);
 
@@ -94,10 +99,19 @@ begin
 	if B then Result := sYes else Result := sNo;
 end;
 
-
 procedure TMainForm.FormShow(Sender: TObject);
+const
+	DefaultDriver = TITAudioDriverType.HighQuality;
+var
+	dr: TITAudioDriverType;
 begin
 	OnShow := nil;
+	PageControl.Enabled := False;
+
+	cmbDriver.Items.Clear;
+	for dr in TITAudioDriverType do
+		cmbDriver.Items.Add(AudioDriverTypeNames[dr]);
+	cmbDriver.ItemIndex := Ord(DefaultDriver);
 
 	// create the it2play instance
 	Module := TITModule.Create;
@@ -106,7 +120,12 @@ begin
 	Output := TAudioDeviceType.Create(Module, 44100);
 
 	// initialize the module with defaults
-	Module.Init(DRIVER_DEFAULT, Output.Frequency);
+	Module.Init(DefaultDriver, Output.Frequency);
+
+	Module.Options.AutoCropOrderList    := True;
+	Module.Options.AutoReduceVolume     := True;
+	Module.Options.AutoCalculateLength  := True;
+	Module.Options.AutoGetOptimumVolume := False;
 
 	// set up callbacks to display waveform/playback info
 	Module.OnBufferFilled := OnBufferFilled;
@@ -146,9 +165,9 @@ procedure TMainForm.LoadModule(const Filename: String);
 var
 	i: Integer;
 	S: String;
-	Sam: TSample;
-	Ins: TInstrument;
-	Pat: TPattern;
+	Sam: TITSample;
+	Ins: TITInstrument;
+	Pat: TITPattern;
 begin
 	lbSamples.Items.Clear;
 	lbInstruments.Items.Clear;
@@ -226,6 +245,8 @@ begin
 			Lines.Clear;
 			Lines.Add(Format('Filename:       %s', [ExtractFilename(Filename)]));
 			Lines.Add(Format('Song title:     %s', [Module.Header.SongName]));
+			Lines.Add(Format('Duration:       %d:%.2d.%.2d',
+				[Module.SongDuration.Hours, Module.SongDuration.Minutes, Module.SongDuration.Seconds]));
 			Lines.Add(Format('Total channels: %d', [Module.ChannelsUsed]));
 			Lines.Add(Format('Channels:       %s', [IfThen(Module.Header.Flags.ITF_STEREO,      'Stereo', 'Mono')]));
 			Lines.Add(Format('Ins/Smp:        %s', [IfThen(Module.Header.Flags.ITF_INSTR_MODE,  'Instruments', 'Samples')]));
@@ -246,12 +267,15 @@ begin
 
 		// load success, start playback
 		bPlay.Enabled := True;
+		PageControl.Enabled := True;
 		bPlayClick(Self);
 	end
 	else
 	begin
 		bPlay.Caption := '-';
 		bPlay.Enabled := False;
+		PageControl.Enabled := False;
+		ShowMessage('Load failed: ' + Module.ErrorMessage);
 	end;
 
 	Output.Unlock;
@@ -260,13 +284,13 @@ end;
 procedure TMainForm.OnRowChange(M: TITModule);
 begin
 	// display song progress
-	lOrder.Caption := Format('Order %d / %d',
+	lOrder.Caption := Format('Order %d / %d ',
 		[Module.CurrentOrder, Module.Header.OrdNum-1]);
-	lPattern.Caption := Format('Pattern: %d.%.2d / %d',
+	lPattern.Caption := Format('Pattern: %d.%.2d / %d ',
 		[Module.CurrentPattern, Module.CurrentRow, Module.Header.PatNum-1]);
-	lTempo.Caption := Format('Tempo/Speed: %d / %d',
+	lTempo.Caption := Format('Tempo/Speed: %d / %d ',
 		[Module.Tempo, Module.CurrentSpeed]);
-	lVoices.Caption := Format('Active voices: %d', [Module.GetActiveVoices]);
+	lVoices.Caption := Format('Active voices: %d ', [Module.GetActiveVoices]);
 
 	if Module.MixingVolume <> sbMixVol.Position then
 		sbMixVol.Position := Module.MixingVolume;
@@ -315,7 +339,7 @@ procedure TMainForm.pbSamplePaint(Sender: TObject);
 var
 	X, Y, W, H: Integer;
 	F, D: Double;
-	S: TSample;
+	S: TITSample;
 	P16: PInt16;
 	P8:  PInt8;
 begin
@@ -330,7 +354,7 @@ begin
 	pbSample.Canvas.PenPos := Point(0, H div 2);
 	pbSample.Canvas.Pen.Color := clBtnText;
 
-	S := TSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
+	S := TITSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
 	if (S = nil) or (S.Length < 2) or (not S.Flags.SMPF_ASSOCIATED_WITH_HEADER) then Exit;
 
 	if S.Flags.SMPF_16BIT then
@@ -362,15 +386,17 @@ end;
 
 procedure TMainForm.lbSamplesClick(Sender: TObject);
 var
-	S: TSample;
+	S: TITSample;
 begin
+	Memo.Lines.Clear;
+	if not Module.Loaded then Exit;
+
 	// draw waveform
 	pbSample.Invalidate;
 
-	Memo.Lines.Clear;
 	Memo.Lines.BeginUpdate;
 
-	S := TSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
+	S := TITSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
 	if S = nil then Exit;
 
 	Memo.Lines.Add('[Sample %d]', [lbSamples.ItemIndex+1]);
@@ -404,16 +430,18 @@ const
 	NoteSharp  = '-#-#--#-#-#-';
 	NoteOctave   = '0123456789';
 var
-	Pat: TPattern;
-	P: TUnpackedPattern;
+	Pat: TITPattern;
+	P: TITUnpackedPattern;
 	N: PUnpackedNote;
 	i, Chan, Row, NumChans, NumRows: Integer;
 	S, sNote: String;
 begin
 	Memo.Lines.Clear;
+	if not Module.Loaded then Exit;
+
 	Memo.Lines.BeginUpdate;
 
-	Pat := TPattern(lbPatterns.Items.Objects[lbPatterns.ItemIndex]);
+	Pat := TITPattern(lbPatterns.Items.Objects[lbPatterns.ItemIndex]);
 	if Pat = nil then Exit;
 
 	P := Pat.Unpack;
@@ -467,6 +495,8 @@ end;
 
 procedure TMainForm.cbStereoChange(Sender: TObject);
 begin
+	if not Module.Loaded then Exit;
+
 	Module.Driver.WaitFor;
 	Module.Header.Flags.ITF_STEREO := cbStereo.Checked;
 end;
@@ -486,6 +516,26 @@ procedure TMainForm.sbPanSepScroll(Sender: TObject; ScrollCode: TScrollCode;
 	var ScrollPos: Integer);
 begin
 	Module.PanSeparation := ScrollPos;
+end;
+
+procedure TMainForm.cmbDriverChange(Sender: TObject);
+begin
+	if (Module <> nil) and (Module.Loaded) and (cmbDriver.ItemIndex >= 0) then
+		Module.DriverType := TITAudioDriverType(cmbDriver.ItemIndex);
+end;
+
+procedure TMainForm.Button1Click(Sender: TObject);
+var
+	WasPlaying: Boolean;
+begin
+	WasPlaying := Module.Playing;
+	if WasPlaying then
+		Module.Stop;
+
+	Module.GetOptimumVolume;
+
+	if WasPlaying then
+		Module.Play;
 end;
 
 

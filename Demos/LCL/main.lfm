@@ -9,7 +9,6 @@ object MainForm: TMainForm
   ClientWidth = 855
   KeyPreview = True
   Position = poScreenCenter
-  LCLVersion = '4.0.0.4'
   OnDestroy = FormDestroy
   OnDropFiles = FormDropFiles
   OnShow = FormShow
@@ -62,13 +61,13 @@ object MainForm: TMainForm
       ClientWidth = 392
       object GroupBox1: TGroupBox
         Left = 8
-        Height = 104
+        Height = 144
         Top = 8
         Width = 376
         Align = alTop
         BorderSpacing.Around = 8
         Caption = 'Settings'
-        ClientHeight = 79
+        ClientHeight = 119
         ClientWidth = 372
         TabOrder = 0
         object sbMixVol: TScrollBar
@@ -119,11 +118,28 @@ object MainForm: TMainForm
           TabOrder = 2
           OnScroll = sbPanSepScroll
         end
+        object cmbDriver: TComboBox
+          Left = 80
+          Height = 28
+          Top = 78
+          Width = 272
+          ItemHeight = 20
+          Style = csDropDownList
+          TabOrder = 3
+          OnChange = cmbDriverChange
+        end
+        object Label1: TLabel
+          Left = 10
+          Height = 20
+          Top = 82
+          Width = 43
+          Caption = 'Driver:'
+        end
       end
       object MemoMod: TMemo
         Left = 8
-        Height = 352
-        Top = 124
+        Height = 312
+        Top = 164
         Width = 376
         Align = alClient
         BorderSpacing.Top = 4
@@ -251,5 +267,14 @@ object MainForm: TMainForm
     Top = 165
     Width = 102
     Caption = 'Active Voices: 0'
+  end
+  object Button1: TButton
+    Left = 337
+    Height = 25
+    Top = 165
+    Width = 75
+    Caption = 'Volume'
+    TabOrder = 5
+    OnClick = Button1Click
   end
 end
