@@ -21,10 +21,9 @@ type
 
 	TMixFunction = procedure(sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal) of object;
 
-	TITAudioDriver_SB16 = class(TITAudioDriver)
+	TITAudioDriver_SB16 = class(TITAudioDriver32)
 	private
 		MixFunctions: array [Boolean, Boolean, Boolean] of TMixFunction;
-		MixFunc: TMixFunction;
 
 		procedure M32Mix8   (sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal);
 		procedure M32Mix16  (sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal);
@@ -34,12 +33,13 @@ type
 		procedure M32Mix16I (sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal);
 		procedure M32Mix8IS (sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal);
 		procedure M32Mix16IS(sc: TSlaveChannel; MixBufPtr: PInt32; NumSamples: Cardinal);
+	protected
+		procedure SetMixingMode(Value: TITAudioDriverType); override;
 	public
 		procedure MixSamples; override;
 		procedure Mix(NumSamples: Integer; AudioOut: PInt16); override;
-		procedure FixSamples; override;
 
-		constructor Create(AModule: TITModule; MixingFrequency: Integer); override;
+		constructor Create(AModule: TITModule; DriverType: TITAudioDriverType; MixingFrequency: Integer); override;
 	end;
 
 implementation
@@ -225,12 +225,11 @@ var
 	MixBufferPtr: PInt32;
 	Quotient, Remainder, Foo: Cardinal;
 	sc: TSlaveChannel;
+	MixFunc: TMixFunction;
 
 	procedure GetSamplesToMix; inline;
 	begin
 		// ((((uintCPUWord_t)SamplesToMix << MIX_FRAC_BITS) | ((uint16_t)sc->Frac32 ^ MIX_FRAC_MASK)) / sc->Delta32) + 1;
-
-		// SamplesToMix and sc.Frac32 = Uint32, MIX_FRAC_ constants verified correct
 		SamplesToMix := ((SamplesToMix << MIX_FRAC_BITS) or
 			((sc.Frac32 and $FFFF) xor MIX_FRAC_MASK)) div sc.Delta32 + 1;
 	end;
@@ -240,10 +239,13 @@ var
 		if SamplesToMix > MixBlockSize then
 			SamplesToMix := MixBlockSize;
 
-		MixFunc(sc, MixBufferPtr, SamplesToMix);
+		if SamplesToMix > 0 then
+		begin
+			MixFunc(sc, MixBufferPtr, SamplesToMix);
 
-		MixBufferPtr += SamplesToMix * 2;
-		MixBlockSize -= SamplesToMix;
+			MixBufferPtr += SamplesToMix * 2;
+			MixBlockSize -= SamplesToMix;
+		end;
 	end;
 
 	procedure ClearFlags;
@@ -500,68 +502,32 @@ begin
 	Busy := False;
 end;
 
-// Fixes sample end bytes for interpolation (yes, we have room after the data).
-// Sustain loops are always handled as non-looping during fix in IT2.
-//
-procedure TITAudioDriver_SB16.FixSamples;
+procedure TITAudioDriver_SB16.SetMixingMode(Value: TITAudioDriverType);
 var
-	i: Integer;
-	Sample: TSample;
-	data8, smp8Ptr: PInt8;
-	src: Int32;
-	byte1, byte2: Int8;
-	Sample16Bit, HasLoop: Boolean;
+	Mode: Byte;
 begin
-	Busy := True;
-
-	for i := 0 to Module.Header.SmpNum-1 do
-	begin
-		Sample := Module.Samples[i];
-		if (Sample = nil) or (Sample.Length = 0) or (Sample.Data[False].Data = nil) then
-			Continue;
-
-		Sample16Bit := Sample.Flags.SMPF_16BIT;
-		HasLoop     := Sample.Flags.SMPF_USE_LOOP;
-
-		data8 := Sample.Data[False].Data;
-		smp8Ptr := @data8[Sample.Length << BoolToInt[Sample16Bit]];
-
-		// 8bb: added this protection for looped samples
-		if (HasLoop) and ((Sample.LoopEnd - Sample.LoopBegin) < 2) then
-		begin
-			smp8Ptr^ := 0; Inc(smp8Ptr);
-			smp8Ptr^ := 0; Inc(smp8Ptr);
-			Exit;
-		end;
-
-		byte1 := 0; byte2 := 0;
-
-		if HasLoop then
-		begin
-			if Sample.Flags.SMPF_LOOP_PINGPONG then
-				src := Max(0, Sample.LoopEnd - 2)
-			else
-				src := Sample.LoopBegin; // 8bb: forward loop
-
-			if Sample16Bit then
-				src *= 2;
-
-			byte1 := data8[src+0];
-			byte2 := data8[src+1];
-		end;
-
-		smp8Ptr^ := byte1; Inc(smp8Ptr);
-		smp8Ptr^ := byte2; Inc(smp8Ptr);
+	case Value of
+		SB16_NonInterpolated: Mode := 0; // 32-Bit Non-interpolated
+		SB16_Interpolated:    Mode := 1; // 32-Bit Interpolated
+		else Exit;
 	end;
 
-	Busy := False;
+	if Mode <> MixMode then
+	begin
+		WaitFor;
+		MixMode := Mode;
+	end;
 end;
 
-constructor TITAudioDriver_SB16.Create(AModule: TITModule; MixingFrequency: Integer);
+constructor TITAudioDriver_SB16.Create(AModule: TITModule; DriverType: TITAudioDriverType; MixingFrequency: Integer);
 begin
+	Flags.DF_SUPPORTS_MIDI := True;
+
+	NumChannels := 64;
+
 	inherited;
 
-	// MixFunctions[SmpIs16Bit, MixMode=1, PAN_SURROUND];
+	// Is16Bit, Interpolated, PAN_SURROUND
 	//
 	MixFunctions[False, False, False] := @M32Mix8;
 	MixFunctions[False, False, True ] := @M32Mix8S;
@@ -572,11 +538,7 @@ begin
 	MixFunctions[True,  True,  False] := @M32Mix16I;
 	MixFunctions[True,  True,  True ] := @M32Mix16IS;
 
-	Flags.DF_SUPPORTS_MIDI := True;
-
-	// MixMode 0 = "32 Bit Non-interpolated"
-	// MixMode 1 = "32 Bit Interpolated"
-	MixMode := 1;
+	MixingMode := DriverType;
 end;
 
 
