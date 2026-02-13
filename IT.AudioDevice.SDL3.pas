@@ -55,8 +55,8 @@ begin
 
 	MixerBusy := True;
 
-	if Length(Info.Data) <= total_amount then
-		SetLength(Info.Data, total_amount+1);
+	if Length(Info.Data) < total_amount then
+		SetLength(Info.Data, total_amount);
 
 	Info.Module.FillAudioBuffer(@Info.Data[0], total_amount div 4); // stereo 16-bit signed samples
 	SDL_PutAudioStreamData(stream, @Info.Data[0], total_amount);

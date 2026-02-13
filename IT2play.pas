@@ -39,6 +39,9 @@ const
 	LOOP_PINGPONG  = 24;
 	LOOP_FORWARDS  = 8;
 
+	SEEK_ORDER_PREV = $FFFE;
+	SEEK_ORDER_NEXT = $FFFF;
+
 	// 8bb: do NOT change these, it will only mess things up!
 	MAX_PATTERNS       = 200;
 	MAX_ORDERS         = 256;
@@ -106,13 +109,15 @@ const
 	SAMPLE_PAD_LENGTH = SMP_DAT_OFFSET * 2;
 
 type
-	TAudioDriverType = (
-		DRIVER_NONE,
-		DRIVER_DEFAULT,
-		DRIVER_WAVWRITER,
-		DRIVER_SB16,
-		DRIVER_SB16MMX,
-		DRIVER_HQ
+	TITAudioDriverType = (
+		WavWriter,
+		SB16_NonInterpolated,     // SB16 0 = 32-Bit Non-interpolated
+		SB16_Interpolated,        // SB16 1 = 32-Bit Interpolated
+		SB16_MMX_NonInterpolated, // SB16 MMX 0 = MMX, Non-Interpolated
+		SB16_MMX_Interpolated,    // SB16 MMX 1 = MMX, Interpolated
+		SB16_MMX_Ramped,          // SB16 MMX 2 = MMX, Volume Ramped
+		SB16_MMX_Filtered,        // SB16 MMX 3 = MMX, Filtered
+		HighQuality               // HQ 0 = High Quality, Floating point, Sinc interpolation
 	);
 
 	TModuleType = (
@@ -127,46 +132,46 @@ type
 
 	TITModule = class;
 
-	TUnpackTempData = record
+	TITUnpackTempData = record
 		NotePackMask, Note, Effect, EffectValue: Byte;
 	end;
 
-	TUnpackedNote = record
+	TITUnpackedNote = record
 		Note,
 		Instrument,
 		Volume,
 		Effect,
 		EffectValue: Byte;
 	end;
-	PUnpackedNote = ^TUnpackedNote;
+	PUnpackedNote = ^TITUnpackedNote;
 
-	TUnpackedPattern = class
+	TITUnpackedPattern = class
 		Channels,
 		Rows:     Word;
-		Notes:    array of array of TUnpackedNote;
+		Notes:    array of array of TITUnpackedNote;
 	end;
 
-	TPattern = class
+	TITPattern = class
 	public
 		Rows:       Word;
 		PackedData: array of Byte;
 
 		function    GetChannelCount: Word;
-		function    Unpack: TUnpackedPattern;
+		function    Unpack: TITUnpackedPattern;
 	end;
 
-	TEnvNode = record
+	TITEnvNode = record
 		Magnitude: Int8;
 		Tick:      Word;
 	end;
-	PEnvNode = ^TEnvNode;
+	PEnvNode = ^TITEnvNode;
 
-	TEnvState = record
+	TITEnvState = record
 		Value, Delta: Int32;
 		Tick, CurNode, NextTick: Int16;
 	end;
 
-	TEnv = record
+	TITEnv = record
 		Flags: TBitFlags8(
 			ENVF_ENABLED,
 			ENVF_LOOP,
@@ -181,10 +186,10 @@ type
 
 		Num, LoopBegin, LoopEnd,
 		SustainLoopBegin, SustainLoopEnd: Byte;
-		NodePoints: array [0..24] of TEnvNode;
+		NodePoints: array [0..24] of TITEnvNode;
 	end;
 
-	TInstrument = class
+	TITInstrument = class
 	public
 		DOSFilename: String[12+1];
 		NNA, DCT, DCA: Byte;
@@ -195,10 +200,10 @@ type
 		MIDIChn, MIDIProg: Byte;
 		MIDIBank: Word;
 		SmpNoteTable: array [0..119] of Word;
-		VolEnv, PanEnv, PitchEnv: TEnv;
+		VolEnv, PanEnv, PitchEnv: TITEnv;
 	end;
 
-	TSample = class
+	TITSample = class
 	type
 		TSampleData = record
 			OrigData: array of Byte;
@@ -319,8 +324,8 @@ type
 		);
 		end;
 
-		Instrument:  TInstrument;
-		Sample:      TSample;
+		Instrument:  TITInstrument;
+		Sample:      TITSample;
 		HostChannel: THostChannel;
 
 		LoopBegin, LoopEnd: Cardinal;
@@ -331,7 +336,7 @@ type
 		FinalVol32768: Word;
 		SmpIs16Bit: Boolean;
 		MixOffset: Cardinal; // 8bb: which sample mix function to use
-		VolEnvState, PanEnvState, PitchEnvState: TEnvState;
+		VolEnvState, PanEnvState, PitchEnvState: TITEnvState;
 
 		// 8bb: added these
 		OldSamples:  array [0..1] of Int32;
@@ -347,8 +352,7 @@ type
 		Frac64, Delta64: UInt64;
 
 		// 8bb: for interpolation taps
-		leftTmpSamples16, rightTmpSamples16: array [Boolean, 0..3] of Int16;
-		leftTmpSamples8,  rightTmpSamples8:  array [Boolean, 0..3] of Int8;
+		leftTmpSamples, rightTmpSamples: array [Boolean, 0..3] of Int16;
 
 		LoopMode, LoopDirection: Byte;
 		Volume, OldVolume: array [Boolean] of Int32;
@@ -366,58 +370,53 @@ type
 		procedure CopyFrom(Src: TSlaveChannel);
 	end;
 
-	TITAudioDriver = class // 8bb: custom struct
-	const
-		// delta/pos resolution for non-HQ drivers
-		MIX_FRAC_BITS = 16;
-		MIX_FRAC_MASK = $FFFF; //(1 << MIX_FRAC_BITS)-1;
+	TITAudioDriver = class // common base for all drivers
 	type
 		TITAudioDriverFlags = record
 			DF_SUPPORTS_MIDI,
 			DF_USES_VOLRAMP,        // 8bb: aka. "hiqual"
-			DF_WAVEFORM,            // Output waveform data available
 			DF_HAS_RESONANCE_FILTER // 8bb: added this
 			: Boolean;
 		end;
 	protected
 		Delta32: Int32;
 		Delta64: Int64;
-		QualityFactorTable: array [0..127] of Float;
 		FreqParameterMultiplier, FreqMultiplier: Float;
+		BytesToMix, MixTransferRemaining, MixTransferOffset: Integer;
+		NumChannels: Cardinal;
 
-	{
+		MixMode:   Byte;
+		MixVolume: Word;
+		MixSpeed:  Cardinal;
+
+		FilterParameters:   array [0..127] of Byte;
+		QualityFactorTable: array [0..127] of Float;
+
+		{
 		// 8bb: for "WAV writer" driver
 		StartNoRamp: Boolean;
 		LastLeftValue, LastRightValue: Int32;
+		}
 
-		// 8bb: for HQ driver
-		fSincLUT: PFloat;
-		fLastLeftValue, fLastRightValue: Float;
-	}
 		// These are used when the final volume is zero, and they'll only update
 		// the sampling position instead of doing actual mixing. They are the same
 		// for SB16/"SB16 MMX"/"WAV writer".
 		//
-		function  PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte): Integer;
+		procedure UpdateNoLoop      (sc: TSlaveChannel; NumSamples: Cardinal); virtual; abstract;
+		procedure UpdateForwardsLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual; abstract;
+		procedure UpdatePingPongLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual; abstract;
 
-		procedure UpdateNoLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
-		procedure UpdateForwardsLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
-		procedure UpdatePingPongLoop(sc: TSlaveChannel; NumSamples: Cardinal); virtual;
+		procedure SetMixingMode({%H-}Value: TITAudioDriverType); virtual;
+
+		function  PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte = 0): Integer; virtual; abstract;
+
+		procedure Clipped;
 	public
-		Module:  TITModule;
+		Module: TITModule;
+		Flags:  TITAudioDriverFlags;
+		Busy:   Boolean;
 
-		Flags: TITAudioDriverFlags;
-
-		Busy: Boolean;
-		NumChannels: Cardinal;
-		FilterParameters: array [0..127] of Byte;
-		MixMode, MixSpeed: Cardinal;
-
-		MixVolume: Word;
-		BytesToMix, MixTransferRemaining, MixTransferOffset: Integer;
-		MixBuffer: array of Int32;
-
-		procedure WaitFor; inline;
+		procedure WaitFor;
 		procedure MixSamples; virtual; abstract;
 		procedure SetTempo(Tempo: Byte); virtual;
 		procedure SetMixVolume(Volume: Byte); virtual;
@@ -425,7 +424,28 @@ type
 		procedure Mix(NumSamples: Integer; AudioOut: PInt16); virtual; abstract;
 		procedure FixSamples; virtual; abstract;
 
-		constructor Create(AModule: TITModule; MixingFrequency: Integer); virtual;
+		property  MixingMode: TITAudioDriverType write SetMixingMode;
+
+		constructor Create(AModule: TITModule; {%H-}DriverType: TITAudioDriverType; MixingFrequency: Integer); virtual;
+	end;
+
+	TITAudioDriver32 = class (TITAudioDriver) // non-float drivers
+	const
+		// delta/pos resolution for non-HQ drivers
+		MIX_FRAC_BITS = 16;
+		MIX_FRAC_MASK = $FFFF; //(1 << MIX_FRAC_BITS)-1;
+	protected
+		procedure UpdateNoLoop      (sc: TSlaveChannel; NumSamples: Cardinal); override;
+		procedure UpdateForwardsLoop(sc: TSlaveChannel; NumSamples: Cardinal); override;
+		procedure UpdatePingPongLoop(sc: TSlaveChannel; NumSamples: Cardinal); override;
+
+		function  PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte = 0): Integer; override;
+	public
+		MixBuffer: array of Int32;
+
+		procedure FixSamples; override;
+
+		constructor Create(AModule: TITModule; {%H-}DriverType: TITAudioDriverType; MixingFrequency: Integer); override;
 	end;
 
 	TITHeader = record
@@ -460,6 +480,10 @@ type
 	private
 		//RenderMode: (RENDER_NONE, RENDER_LENGTH, RENDER_SAMPLE, RENDER_FILE); // TODO
 
+		FDriverType:      TITAudioDriverType;
+		MixingFrequency:  Cardinal;
+		MixingBufferSize: Word;
+
 		RandSeed1, RandSeed2: Word;
 
 		ChannelCountTable,
@@ -474,13 +498,20 @@ type
 		CommandTable,
 		VolumeEffectTable: array of TCommandProc;
 
+		Rendering: Boolean;
 		ProcessOrder, ProcessRow, BreakRow: Word;
 		DecodeExpectedPattern, DecodeExpectedRow: Word;
 
-		EmptyPattern: TPattern;
+		EmptyPattern: TITPattern;
 
 		LastMIDIByte, MIDIInterpretState, MIDIInterpretType: Byte;
 		MIDIDataArea: array [0..(9+16+128)*32-1] of Byte;
+
+		OrderVisited: array [0..MAX_ORDERS-1] of Boolean;
+
+		FErrorMessage: String;
+
+		procedure Error(const Msg: String);
 
 		procedure NoCommand({%H-}hc: THostChannel);
 
@@ -561,8 +592,8 @@ type
 		procedure PitchSlide  (hc: THostChannel; sc: TSlaveChannel; SlideValue: Int16);
 		function  Gxx_ChangeSample(hc: THostChannel; sc: TSlaveChannel; sample: Byte): Boolean;
 
-		function  DuplicateCheck(out scOut: TSlaveChannel; hc: THostChannel; hostChnNum: Byte; ins: TInstrument; DCT, DCVal: Byte): Boolean;
-		function  GetPattern(Index: Word): TPattern;
+		function  DuplicateCheck(out scOut: TSlaveChannel; hc: THostChannel; hostChnNum: Byte; ins: TITInstrument; DCT, DCVal: Byte): Boolean;
+		function  GetPattern(Index: Word): TITPattern;
 		procedure UpdateGOTONote; // Get offset
 		procedure UpdateNoteData;
 		procedure UpdateData;
@@ -585,10 +616,10 @@ type
 		procedure SetFilterResonance(hc: THostChannel; sc: TSlaveChannel; Value: Byte); // Assumes that channel is non-disowned
 
 		// Instruments
-		function  UpdateEnvelope(var env: TEnv; var envState: TEnvState; SustainReleased: Boolean): Boolean;
+		function  UpdateEnvelope(var env: TITEnv; var envState: TITEnvState; SustainReleased: Boolean): Boolean;
 		procedure UpdateInstruments;
-		function  AllocateChannelInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TInstrument; var hcFlags: THostChannelFlags): TSlaveChannel;
-		procedure InitPlayInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TInstrument);
+		function  AllocateChannelInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TITInstrument; var hcFlags: THostChannelFlags): TSlaveChannel;
+		procedure InitPlayInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TITInstrument);
 
 		//procedure PrepareWAVRender; // 8bb: added this
 		//procedure WAV_WriteHeader(Stream: TStream; Freq: DWord);
@@ -600,33 +631,46 @@ type
 		procedure InitTempo;
 		function  FindFreeSlaveChannel: TSlaveChannel;
 
-		function  AllocatePattern(Index, NewLength: Word): TPattern;
+		function  AllocatePattern(Index, NewLength: Word): TITPattern;
 		procedure ReleasePattern(Index: Word);
 
 		function  TranslateS3MPattern(Src: PByte; Pattern: Word): Boolean;
 
+		function  InitialRender(Fake: Boolean = False): Boolean;
+
 		function  LoadIT (Stream: TStream): Boolean;
 		function  LoadS3M(Stream: TStream): Boolean;
+		procedure ModuleLoaded;
 
-		function  OpenMixer(MixingFrequency, MixingBufferSize: Word): Boolean; // 16000..64000, 256..8192
+		function  OpenMixer: Boolean; // 16000..64000, 256..8192
 		procedure LockMixer;
 		procedure UnlockMixer;
 		procedure CloseMixer;
+
+		// getters/setters
 		procedure SetMixingVolume(Value: Byte);
 		procedure SetPanSeparation(Value: Byte);
+		procedure SetDriverType(NewDriver: TITAudioDriverType);
 	public
 		Header: TITHeader;
 
 		Orders:        array [0..MAX_ORDERS-1] of Byte;
-		Instruments:   array [0..MAX_INSTRUMENTS-1] of TInstrument;
-		Samples:       array [0..MAX_SAMPLES-1]  of TSample;
-		Patterns:      array [0..MAX_PATTERNS-1] of TPattern;
+		Instruments:   array [0..MAX_INSTRUMENTS-1] of TITInstrument;
+		Samples:       array [0..MAX_SAMPLES-1]  of TITSample;
+		Patterns:      array [0..MAX_PATTERNS-1] of TITPattern;
 		HostChannels:  array [0..MAX_HOST_CHANNELS-1]  of THostChannel;
 		SlaveChannels: array [0..MAX_SLAVE_CHANNELS-1] of TSlaveChannel;
 
-		{Patterns: TObjectList<TPattern>;
-		Instruments: TObjectList<TInstrument>;
-		Samples: TObjectList<TSample>;}
+		SongDuration: record
+			Samples: UInt64;
+			Hours,
+			Minutes,
+			Seconds: Word;
+		end;
+
+		{Patterns: TObjectList<TITPattern>;
+		Instruments: TObjectList<TITInstrument>;
+		Samples: TObjectList<TITSample>;}
 
 		SongMessage: TStringList;
 		//SongMessage: array [0..MAX_SONGMSG_LENGTH] of AnsiChar; // 8bb: +1 to fit protection-NUL
@@ -649,6 +693,7 @@ type
 		OnCloseMixer:   TMixerDefaultEvent;
 		OnPlayback:     TMixerBoolEvent;
 		OnBufferFilled: TMixerDefaultEvent;
+		OnLoaded:       TMixerDefaultEvent;
 
 		// player callbacks
 		//
@@ -656,6 +701,16 @@ type
 		OnRowChange:    TMixerDefaultEvent;
 		OnOrderChange:  TMixerDefaultEvent;
 		OnTempoChange:  TMixerDefaultEvent;
+		OnMixerClipped: TMixerDefaultEvent;
+
+		Options: record
+			AutoReduceVolume,
+			AutoCropOrderList,
+			AutoFindSubSongs,
+			AutoCalculateLength,
+			AutoGetOptimumVolume
+			: Boolean;
+		end;
 
 		function  GetModuleType(Stream: TStream): TModuleType;
 		function  LoadFromStream(Stream: TStream): Boolean;
@@ -667,20 +722,29 @@ type
 		function  Play(Order: Word = 0): Boolean;
 		procedure StopChannels;
 		procedure Stop;
+
+		procedure SeekTo(Order: Word);
 		procedure PreviousOrder;
 		procedure NextOrder;
 
-		procedure FreeSong;
-
+		// postprocessing/utility
+		procedure CropOrderList;
+		procedure FindSubSongs;
+		procedure CalculateLength;
+		procedure GetOptimumVolume;
 		function  GetActiveVoices: Word;
+
 		//function  RenderToWAV(Filename: String): Boolean;
 
-		function  Init(DriverType: TAudioDriverType;
-		          MixingFrequency: Word = 44100;
-		          MixingBufferSize: Cardinal = 0): Boolean;
+		function  Init(MixingMode: TITAudioDriverType;
+		          Frequency: Word = 44100;
+		          BufferSize: Cardinal = 0): Boolean;
+		procedure FreeSong;
 
+		property ErrorMessage: String read FErrorMessage;
 		property MixingVolume:  Byte read Header.MixVolume write SetMixingVolume;
 		property PanSeparation: Byte read Header.PanSep    write SetPanSeparation;
+		property DriverType: TITAudioDriverType read FDriverType write SetDriverType;
 
 		constructor Create;
 		destructor  Destroy; override;
@@ -690,9 +754,23 @@ type
 	function NearbyInt(F: Float): Integer; inline;
 
 
+const
+	AudioDriverTypeNames: array[TITAudioDriverType] of String = (
+		'WAV Writer',
+		'SB16 (Non-Interpolated)',
+		'SB16 (Interpolated)',
+		'SB16 MMX (Non-Interpolated)',
+		'SB16 MMX (Interpolated)',
+		'SB16 MMX (Ramped)',
+		'SB16 MMX (Filtered)',
+		'High Quality (Sinc Interpolated)'
+	);
+
+
 implementation
 
 uses
+	IT.AudioDriver.HQ,
 	IT.AudioDriver.SB16,
 	IT.AudioDriver.SB16MMX;
 
@@ -792,10 +870,10 @@ end;
 
 
 // ================================================================================================
-// TSample
+// TITSample
 // ================================================================================================
 
-procedure TSample.AllocateSample(NewLength: Cardinal; Is16Bit, IsStereo: Boolean);
+procedure TITSample.AllocateSample(NewLength: Cardinal; Is16Bit, IsStereo: Boolean);
 var
 	IsRightSample: Boolean;
 begin
@@ -819,7 +897,7 @@ begin
 	Flags.SMPF_ASSOCIATED_WITH_HEADER := True;
 end;
 
-procedure TSample.ReleaseSample;
+procedure TITSample.ReleaseSample;
 var
 	B: Boolean;
 begin
@@ -836,7 +914,7 @@ begin
 		Module.UnlockMixer;
 end;
 
-procedure TSample.Decompress16BitData(Dst: PInt16; Src: PByte; BlockLength: Cardinal);
+procedure TITSample.Decompress16BitData(Dst: PInt16; Src: PByte; BlockLength: Cardinal);
 var
 	Byte8, BitDepth, BitDepthInv, BitsRead: Byte;
 	Bytes16, LastVal, DX: Word;
@@ -937,7 +1015,7 @@ begin
 	end;
 end;
 
-procedure TSample.Decompress8BitData(Dst: PInt8; Src: Pointer; BlockLength: Cardinal);
+procedure TITSample.Decompress8BitData(Dst: PInt8; Src: Pointer; BlockLength: Cardinal);
 var
 	LastVal, Byte8, BitDepth, BitDepthInv, BitsRead: Byte;
 	Bytes16: Word;
@@ -1030,7 +1108,7 @@ begin
 	end;
 end;
 
-function TSample.LoadCompressedSample(Stream: TStream;
+function TITSample.LoadCompressedSample(Stream: TStream;
 	Is16Bit, IsStereo, IsDeltaEncoded: Boolean): Boolean;
 var
 	Chan: Boolean;
@@ -1100,7 +1178,7 @@ begin
 	Result := True;
 end;
 
-constructor TSample.Create(AModule: TITModule);
+constructor TITSample.Create(AModule: TITModule);
 begin
 	inherited Create;
 
@@ -1112,14 +1190,88 @@ end;
 // TITAudioDriver
 // ================================================================================================
 
-
-function TITAudioDriver.PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte): Integer;
+constructor TITAudioDriver.Create(AModule: TITModule; DriverType: TITAudioDriverType; MixingFrequency: Integer);
 var
 	i: Integer;
-	Clipped: Boolean;
+begin
+	inherited Create;
+
+	Module := AModule;
+	MixMode := 255; // uninitialized default
+	MixSpeed := MixingFrequency;
+
+	// pre-calc filter coeff tables (bit-accurate)
+	if Flags.DF_HAS_RESONANCE_FILTER then
+	begin
+		for i := 0 to 127 do
+			QualityFactorTable[i] := Power(10, (-i * 24) / (128 * 20));
+
+		// -1/(24*256) (8bb: w/ small rounding error!)
+		FreqParameterMultiplier := -0.000162760407;
+
+		// 1/(2*PI*110.0*2^0.25) * MixingFrequency
+		FreqMultiplier := 0.00121666200 * MixingFrequency;
+	end;
+end;
+
+procedure TITAudioDriver.ResetMixer;
+begin
+	WaitFor;
+	MixTransferRemaining := 0;
+	MixTransferOffset := 0;
+	SetMixVolume(Module.Header.MixVolume);
+end;
+
+// wait until mixing for current block has finished
+procedure TITAudioDriver.WaitFor;
+begin
+	while Busy do;
+end;
+
+// // clipping occurred during mixing, lower mixing volume
+procedure TITAudioDriver.Clipped;
+begin
+	if Module.Header.MixVolume > 0 then
+	begin
+		if Module.Options.AutoReduceVolume then
+		begin
+			Dec(Module.Header.MixVolume);
+			SetMixVolume(Module.Header.MixVolume);
+		end;
+	end;
+	if Assigned(Module.OnMixerClipped) then
+		Module.OnMixerClipped(Module);
+end;
+
+procedure TITAudioDriver.SetTempo(Tempo: Byte);
+begin
+	if Tempo < LOWEST_BPM_POSSIBLE then
+		Tempo := LOWEST_BPM_POSSIBLE;
+
+	BytesToMix := ((MixSpeed * 2) + (MixSpeed div 2)) div Tempo;
+
+	if (Module <> nil) and (Assigned(Module.OnTempoChange)) then
+		Module.OnTempoChange(Module);
+end;
+
+procedure TITAudioDriver.SetMixVolume(Volume: Byte);
+begin
+	MixVolume := Volume;
+	Module.RecalculateAllVolumes;
+end;
+
+procedure TITAudioDriver.SetMixingMode(Value: TITAudioDriverType);
+begin
+	//
+end;
+
+function TITAudioDriver32.PostMix(AudioOut16: PInt16; SamplesLeft: Integer; SampleShiftValue: Byte): Integer;
+var
+	i: Integer;
+	HasClipped: Boolean;
 	Sample: Int32;
 begin
-	Clipped := False;
+	HasClipped := False;
 
 	for i := 0 to SamplesLeft*2 - 1 do
 	begin
@@ -1129,31 +1281,100 @@ begin
 		if Sample < -32768 then
 		begin
 			Sample := -32768;
-			Clipped := True;
+			HasClipped := True;
 		end
 		else
 		if Sample > +32767 then
 		begin
 			Sample := +32767;
-			Clipped := True;
+			HasClipped := True;
 		end;
 
 		AudioOut16^ := Sample;
 		Inc(AudioOut16);
 	end;
 
-	if Clipped then
-	begin
-		Dec(Module.Header.MixVolume);
-		SetMixVolume(Module.Header.MixVolume);
-	end;
+	if HasClipped then
+		Clipped;
 
 	Result := SamplesLeft;
 end;
 
+// Fixes sample end bytes for interpolation (yes, we have room after the data).
+// Sustain loops are always handled as non-looping during fix in IT2.
+//
+procedure TITAudioDriver32.FixSamples;
+var
+	i: Integer;
+	Sample: TITSample;
+	data8, smp8Ptr: PInt8;
+	src: Int32;
+	byte1, byte2: Int8;
+	Sample16Bit, HasLoop: Boolean;
+begin
+	Busy := True;
+
+	for i := 0 to Module.Header.SmpNum-1 do
+	begin
+		Sample := Module.Samples[i];
+		if (Sample = nil) or (Sample.Length = 0) or (Sample.Data[False].Data = nil) then
+			Continue;
+
+		Sample16Bit := Sample.Flags.SMPF_16BIT;
+		HasLoop     := Sample.Flags.SMPF_USE_LOOP;
+
+		data8 := Sample.Data[False].Data;
+		smp8Ptr := @data8[Sample.Length << BoolToInt[Sample16Bit]];
+
+		// 8bb: added this protection for looped samples
+		if (HasLoop) and ((Sample.LoopEnd - Sample.LoopBegin) < 2) then
+		begin
+			smp8Ptr^ := 0; Inc(smp8Ptr);
+			smp8Ptr^ := 0; Inc(smp8Ptr);
+			Exit;
+		end;
+
+		byte1 := 0; byte2 := 0;
+
+		if HasLoop then
+		begin
+			if Sample.Flags.SMPF_LOOP_PINGPONG then
+				src := Max(0, Sample.LoopEnd - 2)
+			else
+				src := Sample.LoopBegin; // 8bb: forward loop
+
+			if Sample16Bit then
+				src *= 2;
+
+			byte1 := data8[src+0];
+			byte2 := data8[src+1];
+		end;
+
+		smp8Ptr^ := byte1; Inc(smp8Ptr);
+		smp8Ptr^ := byte2; Inc(smp8Ptr);
+	end;
+
+	Busy := False;
+end;
+
+constructor TITAudioDriver32.Create(AModule: TITModule; DriverType: TITAudioDriverType; MixingFrequency: Integer);
+var
+	MaxSamplesToMix: Integer;
+begin
+	inherited Create(AModule, DriverType, MixingFrequency);
+
+	MixingFrequency := Max(MixingFrequency, 8000);
+	MixingFrequency := Min(MixingFrequency, 64000);
+	MixSpeed := MixingFrequency;
+	MaxSamplesToMix := ((MixingFrequency * 2) + (MixingFrequency div 2)) div LOWEST_BPM_POSSIBLE + 1;
+	SetLength(MixBuffer, MaxSamplesToMix * 2);
+
+	NumChannels := 64;
+end;
+
 // TODO remove unnecessary code duplication
 
-procedure TITAudioDriver.UpdateNoLoop(sc: TSlaveChannel; NumSamples: Cardinal);
+procedure TITAudioDriver32.UpdateNoLoop(sc: TSlaveChannel; NumSamples: Cardinal);
 var
 	SamplingPosition, IntSamples: Cardinal;
 	FracSamples: Word;
@@ -1166,7 +1387,7 @@ begin
 	FracSamples := Delta and MIX_FRAC_MASK;
 
 	sc.Frac32 += FracSamples;
-	sc.SamplingPosition += SarLongInt(Int32(sc.Frac32), MIX_FRAC_BITS);
+	SamplingPosition += SarLongInt(Int32(sc.Frac32), MIX_FRAC_BITS);
 	sc.Frac32 := sc.Frac32 and MIX_FRAC_MASK;
 	SamplingPosition += IntSamples;
 
@@ -1184,7 +1405,7 @@ begin
 	sc.SamplingPosition := SamplingPosition;
 end;
 
-procedure TITAudioDriver.UpdateForwardsLoop(sc: TSlaveChannel; NumSamples: Cardinal);
+procedure TITAudioDriver32.UpdateForwardsLoop(sc: TSlaveChannel; NumSamples: Cardinal);
 var
 	IntSamples, LoopLength: Cardinal;
 	FracSamples: Word;
@@ -1209,7 +1430,7 @@ begin
 	end;
 end;
 
-procedure TITAudioDriver.UpdatePingPongLoop(sc: TSlaveChannel; NumSamples: Cardinal);
+procedure TITAudioDriver32.UpdatePingPongLoop(sc: TSlaveChannel; NumSamples: Cardinal);
 var
 	IntSamples, LoopLength, NewLoopPos: Cardinal;
 	FracSamples: Word;
@@ -1262,55 +1483,6 @@ begin
 			end;
 		end;
 	end;
-end;
-
-procedure TITAudioDriver.WaitFor;
-begin
-	while Busy do;
-end;
-
-procedure TITAudioDriver.SetTempo(Tempo: Byte);
-begin
-	if Tempo < LOWEST_BPM_POSSIBLE then
-		Tempo := LOWEST_BPM_POSSIBLE;
-
-	BytesToMix := ((MixSpeed * 2) + (MixSpeed div 2)) div Tempo;
-
-	if (Module <> nil) and (Assigned(Module.OnTempoChange)) then
-		Module.OnTempoChange(Module);
-end;
-
-procedure TITAudioDriver.SetMixVolume(Volume: Byte);
-begin
-	MixVolume := Volume;
-	Module.RecalculateAllVolumes;
-end;
-
-procedure TITAudioDriver.ResetMixer;
-begin
-	WaitFor;
-	MixTransferRemaining := 0;
-	MixTransferOffset := 0;
-	SetMixVolume(Module.Header.MixVolume);
-end;
-
-constructor TITAudioDriver.Create(AModule: TITModule; MixingFrequency: Integer);
-var
-	MaxSamplesToMix: Integer;
-begin
-	inherited Create;
-
-	Flags := Default(TITAudioDriverFlags);
-	Module := AModule;
-
-	MixingFrequency := Max(MixingFrequency, 8000);
-	MixingFrequency := Min(MixingFrequency, 64000);
-	MixSpeed := MixingFrequency;
-
-	MaxSamplesToMix := ((MixingFrequency * 2) + (MixingFrequency div 2)) div LOWEST_BPM_POSSIBLE + 1;
-	SetLength(MixBuffer, MaxSamplesToMix * 2);
-
-	NumChannels := 64;
 end;
 
 
@@ -1612,7 +1784,7 @@ begin
 end;
 
 function TITModule.DuplicateCheck(out scOut: TSlaveChannel; hc: THostChannel; hostChnNum: Byte;
-	ins: TInstrument; DCT, DCVal: Byte): Boolean;
+	ins: TITInstrument; DCT, DCVal: Byte): Boolean;
 var
 	i: Integer;
 	sc: TSlaveChannel;
@@ -1652,7 +1824,7 @@ end;
 
 procedure TITModule.PreInitCommand(hc: THostChannel);
 var
-	Ins: TInstrument;
+	Ins: TITInstrument;
 begin
 	if hc.NotePackMask and $33 <> 0 then
 	begin
@@ -1699,7 +1871,7 @@ end;
 procedure TITModule.UpdateGOTONote;
 var
 	hc: THostChannel;
-	Pattern: TPattern;
+	Pattern: TITPattern;
 	p: PByte;
 	rowsTodo: Word;
 	chnNum: Byte;
@@ -1795,6 +1967,7 @@ begin
 	end;
 
 	p := PatternOffset;
+	if p = nil then Exit; //!!!
 
 	while True do
 	begin
@@ -1855,7 +2028,7 @@ begin
 	PatternOffset := p;
 end;
 
-function TPattern.GetChannelCount: Word;
+function TITPattern.GetChannelCount: Word;
 var
 	Row, Chan: Integer;
 	p: PByte;
@@ -1916,18 +2089,18 @@ begin
 	end;
 end;
 
-function TPattern.Unpack: TUnpackedPattern;
+function TITPattern.Unpack: TITUnpackedPattern;
 var
 	Row, Chan, NumChannels: Integer;
 	p: PByte;
 	chnNum, Mask, nn: Byte;
 	Note: PUnpackedNote;
-	TempData: array of TUnpackTempData;
+	TempData: array of TITUnpackTempData;
 begin
 	NumChannels := Self.GetChannelCount;
 	if NumChannels < 1 then Exit(nil);
 
-	Result := TUnpackedPattern.Create;
+	Result := TITUnpackedPattern.Create;
 	Result.Channels := NumChannels;
 	Result.Rows     := Self.Rows;
 
@@ -1939,9 +2112,9 @@ begin
 	// zero out the result structures
 	for Chan := 0 to NumChannels-1 do
 	begin
-		TempData[Chan] := Default(TUnpackTempData);
+		TempData[Chan] := Default(TITUnpackTempData);
 		for Row := 0 to Self.Rows-1 do
-			Result.Notes[Chan, Row] := Default(TUnpackedNote);
+			Result.Notes[Chan, Row] := Default(TITUnpackedNote);
 	end;
 
 	for Row := 0 to Self.Rows-1 do
@@ -2007,11 +2180,11 @@ begin
 	end;
 end;
 
-function TITModule.GetPattern(Index: Word): TPattern;
+function TITModule.GetPattern(Index: Word): TITPattern;
 begin
 	Assert(Index < MAX_PATTERNS);
 	Result := Patterns[Index];
-	if Result.PackedData = nil then
+	if (Result = nil) or (Length(Result.PackedData) = 0) then
 		Result := EmptyPattern;
 end;
 
@@ -2036,7 +2209,7 @@ begin
 		if RowDelay = 0 then
 		begin
 			RowDelay := 1;
-			RowDelayOn := false;
+			RowDelayOn := False;
 			NewRow := ProcessRow + 1;
 
 			if NewRow >= NumberOfRows then
@@ -2045,21 +2218,30 @@ begin
 
 				while True do
 				begin
-					if NewOrder >= 256 then
+					if NewOrder >= MAX_ORDERS then
 					begin
 						NewOrder := 0;
+						StopSong := True;
 						Continue;
 					end;
 
 					NewPattern := Orders[NewOrder]; // next pattern
-					if NewPattern >= 200 then
+
+					if NewPattern >= Header.PatNum then
+					begin
+						NewOrder := 0;
+						StopSong := True;
+						Continue;
+					end;
+
+					if NewPattern >= MAX_PATTERNS then
 					begin
 						if NewPattern = $FE then // 8bb: skip pattern separator
 							Inc(NewOrder)
 						else
 						begin
 							NewOrder := 0;
-							StopSong := True; // 8bb: for WAV rendering
+							StopSong := True;
 						end;
 					end
 					else
@@ -2072,7 +2254,12 @@ begin
 				ProcessOrder := NewOrder;
 				if NewOrder <> CurrentOrder then
 				begin
+					if OrderVisited[NewOrder] then
+						StopSong := True;
+					OrderVisited[NewOrder] := True;
+
 					CurrentOrder := NewOrder;
+
 					if Assigned(OnOrderChange) then
 						OnOrderChange(Self);
 				end;
@@ -2139,7 +2326,7 @@ end;
 procedure TITModule.UpdateAutoVibrato(sc: TSlaveChannel);
 var
 	VibratoData: Int16;
-	smp: TSample;
+	smp: TITSample;
 begin
 	smp := sc.Sample;
 	Assert(smp <> nil);
@@ -2241,7 +2428,7 @@ var
 	LoopMode: Byte;
 	LoopBegin, LoopEnd: Cardinal;
 	LoopEnabled, SustainLoopOnlyAndNoteOff: Boolean;
-	S: TSample;
+	S: TITSample;
 begin
 	S := sc.Sample;
 	Assert(S <> nil);
@@ -2306,7 +2493,7 @@ var
 	value: Int8;
 	vol, pan: Int16;
 	sc: TSlaveChannel;
-	ins: TInstrument;
+	ins: TITInstrument;
 begin
 	sc := hc.SlaveChannel;
 	ins := sc.Instrument;
@@ -2336,7 +2523,7 @@ end;
 function TITModule.AllocateChannelSample(hc: THostChannel; var hcFlags: THostChannelFlags): TSlaveChannel;
 var
 	sc: TSlaveChannel;
-	Sam: TSample;
+	Sam: TITSample;
 begin
 	Result := nil;
 	sc := SlaveChannels[hc.HostChnNum];
@@ -2407,7 +2594,7 @@ var
 	hostChnNum, NNA, DCT, DCVal, count, lowestVol, targetSmp, scSmp: Byte;
 	scInitialized, skipMIDITest, doDupeCheck: Boolean;
 	sc, scTmp, scTmp2: TSlaveChannel;
-	ins: TInstrument;
+	ins: TITInstrument;
 begin
 	LastSlaveChannel := nil;
 
@@ -2730,6 +2917,13 @@ begin
 		Driver.SetTempo(Tempo);
 end;
 
+procedure TITModule.Error(const Msg: String);
+begin
+	FErrorMessage := Msg;
+	if not Msg.IsEmpty then
+		Debug('ERROR: ' + Msg);
+end;
+
 procedure TITModule.NoCommand(hc: THostChannel);
 begin
 	// do nothing!
@@ -3005,7 +3199,7 @@ procedure TITModule.InitNoCommand(hc: THostChannel);
 var
 	hcFlags: THostChannelFlags;
 	sc: TSlaveChannel;
-	S: TSample;
+	S: TITSample;
 	volColumnPortamento: Boolean;
 begin
 	hcFlags.WordAccess := hc.Flags.WordAccess and $00FF;
@@ -3193,7 +3387,7 @@ end;
 
 function TITModule.Gxx_ChangeSample(hc: THostChannel; sc: TSlaveChannel; sample: Byte): Boolean;
 var
-	S: TSample;
+	S: TITSample;
 begin
 	sc.Flags.SF_NOTE_STOP := False;
 	sc.Flags.SF_LOOP_CHANGED := False;
@@ -3251,8 +3445,8 @@ end;
 procedure TITModule.InitCommandG11(hc: THostChannel);
 var
 	sc: TSlaveChannel;
-	ins: TInstrument;
-	s: TSample;
+	ins: TITInstrument;
+	s: TITSample;
 	ChangeInstrument, volFromVolColumn: Boolean;
 	vol, hcSmp, oldSlaveIns: Byte;
 	oldSCFlags, SlideSpeed: Word;
@@ -4521,6 +4715,7 @@ begin
 	SCmd := hc.MiscEfxData[0];
 
 	sc := hc.SlaveChannel;
+	if sc = nil then Exit; // !!!
 
 	if SCmd = $D0 then // 8bb: Note delay
 	begin
@@ -4577,7 +4772,7 @@ begin
 	end;
 
 	Tempo := T;
-	Driver.SetTempo(Tempo);
+	InitTempo;
 end;
 
 // W - global volume
@@ -4829,14 +5024,14 @@ begin
 	end;
 end;
 
-function TITModule.AllocatePattern(Index, NewLength: Word): TPattern;
+function TITModule.AllocatePattern(Index, NewLength: Word): TITPattern;
 begin
 	if Index >= MAX_PATTERNS then Exit(nil);
 
 	if (Patterns[Index] = nil) or (Length(Patterns[Index].PackedData) = 0) then
 	begin
 		ReleasePattern(Index);
-		Patterns[Index] := TPattern.Create;
+		Patterns[Index] := TITPattern.Create;
 		SetLength(Patterns[Index].PackedData, NewLength);
 	end;
 
@@ -4985,7 +5180,7 @@ Next:
 	Result := True;
 end;
 
-procedure EncodePattern(var Patt: TPattern; Rows: Byte);
+procedure EncodePattern(var Patt: TITPattern; Rows: Byte);
 var
 	i: Integer;
 	//Src, Dst, Enc: PByte;
@@ -5278,7 +5473,7 @@ var
 	Pan, DefPan, Kind, MemSegH, SmpFlags, ChannelOffFlag: Byte;
 	Chan, IsStereo, Is16Bit: Boolean;
 	PackedData: array of Byte;
-	Sam: TSample;
+	Sam: TITSample;
 	Ptr8: PInt8;
 	Ptr16: PInt16;
 begin
@@ -5355,7 +5550,7 @@ begin
 		Header.ChnlVol[i] := 64;
 
 	FillByte(Orders[0], MAX_ORDERS, 255);
-	Stream.ReadBuffer(Orders[0],  Header.OrdNum);  // Order list loaded
+	Stream.ReadBuffer(Orders[0], Header.OrdNum);  // Order list loaded
 	Stream.ReadBuffer({%H-}SmpPtrs[0], Header.SmpNum * 2);
 	Stream.ReadBuffer({%H-}PatPtrs[0], Header.PatNum * 2);
 
@@ -5379,7 +5574,7 @@ begin
 		Offset := SmpPtrs[i] << 4;
 		if Offset = 0 then Continue;
 
-		Sam := TSample.Create(Self);
+		Sam := TITSample.Create(Self);
 		Samples[i].Free; // precaution
 		Samples[i] := Sam;
 
@@ -5487,6 +5682,145 @@ begin
 	Result := True;
 end;
 
+procedure TITModule.CropOrderList;
+var
+	i: Integer;
+begin
+	if Loaded then
+	for i := 0 to Header.OrdNum-1 do
+	begin
+		if (Orders[i] >= Header.PatNum) and (Orders[i] < MAX_PATTERNS) then
+		begin
+			Header.OrdNum := i;
+			Break;
+		end;
+	end;
+end;
+
+procedure TITModule.FindSubSongs;
+var
+	i: Integer;
+begin
+end;
+
+procedure TITModule.CalculateLength;
+begin
+	if Playing then Exit;
+
+	InitialRender(True);
+end;
+
+procedure TITModule.GetOptimumVolume;
+var
+	B: Boolean;
+begin
+	if Playing then Exit;
+
+	B := Options.AutoReduceVolume;
+	Options.AutoReduceVolume := True;
+	MixingVolume := 128; // automatically lowered during mixing
+	InitialRender(False);
+	Options.AutoReduceVolume := B;
+end;
+
+function TITModule.InitialRender(Fake: Boolean = False): Boolean;
+const
+	BufLen = 2048;
+var
+	Buffer: array of Int16;
+	SamplesRendered: UInt64 = 0;
+	Duration: Float;
+	BytesToMix: Integer;
+begin
+	if (Playing) or (not Loaded) then Exit(False);
+
+	if Fake then
+		BytesToMix := ((MixingFrequency * 2) + (MixingFrequency div 2)) div Tempo
+	else
+	begin
+		BytesToMix := BufLen * 4;
+		SetLength(Buffer, BytesToMix*2);
+	end;
+
+	Rendering := True;
+	StopSong := False;
+
+	Play;
+	LockMixer;
+
+	while not StopSong do
+	begin
+		if Fake then
+			Update
+		else
+			FillAudioBuffer(@Buffer[0], BytesToMix);
+		Inc(SamplesRendered, BytesToMix);
+	end;
+
+	Duration := SamplesRendered / MixingFrequency;
+
+	SongDuration.Samples := SamplesRendered;
+	SongDuration.Hours   := Trunc(Duration / 3600);
+	SongDuration.Minutes := Trunc(Duration mod 3600 / 60);
+	SongDuration.Seconds := Trunc(Duration mod 60);
+
+	DebugInfo(Format('Duration=%d:%.2d.%.2d',
+		[SongDuration.Hours, SongDuration.Minutes, SongDuration.Seconds]));
+
+	Rendering := False;
+	UnlockMixer;
+	Stop;
+
+	Result := True;
+end;
+
+procedure TITModule.ModuleLoaded;
+var
+	i, Y: Integer;
+begin
+	Loaded := True;
+
+	Stop;
+
+	SongDuration.Samples := 0;
+	SongDuration.Hours   := 0;
+	SongDuration.Minutes := 0;
+	SongDuration.Seconds := 0;
+
+	// crop orderlist at invalid pattern number
+	//
+	if Options.AutoCropOrderList then
+		CropOrderList;
+
+	if Options.AutoFindSubSongs then
+		FindSubSongs;
+
+	if Options.AutoGetOptimumVolume then
+		GetOptimumVolume
+	else
+	if Options.AutoCalculateLength then
+		CalculateLength;
+
+	// count total channels used in song
+	//
+	ChannelsUsed := 0;
+	for i := 0 to Header.PatNum-1 do
+	begin
+		if Patterns[i] <> nil then
+		for Y := 0 to Header.OrdNum do // pattern used in song?
+		begin
+			if Orders[Y] = i then
+			begin
+				ChannelsUsed := Max(ChannelsUsed, Patterns[i].GetChannelCount);
+				Break;
+			end;
+		end;
+	end;
+
+	if Assigned(OnLoaded) then
+		OnLoaded(Self);
+end;
+
 function TITModule.LoadIT(Stream: TStream): Boolean;
 
 	function ReadString(L: Word): AnsiString;
@@ -5541,12 +5875,12 @@ var
 	InsPtrOffset, InsOffset: Cardinal;
 	B, IsStereo, IsCompressed, Is16Bit, IsSignedSamples, IsDeltaEncoded: Boolean;
 	PatLength, PatRows, W: Word;
-	Pattern: TPattern;
+	Pattern: TITPattern;
 	Ptr16: PInt16;
 	Ptr8:  PInt8;
-	Sam: TSample;
-	Ins: TInstrument;
-	env: ^TEnv;
+	Sam: TITSample;
+	Ins: TITInstrument;
+	env: ^TITEnv;
 begin
 	Result := False;
 	SP := Stream.Position;
@@ -5591,7 +5925,10 @@ begin
 		// IT2 doesn't do this test, but I do it for safety.
 		if (Header.OrdNum > MAX_ORDERS+1) or (Header.InsNum > MAX_INSTRUMENTS) or
 		   (Header.SmpNum > MAX_SAMPLES)  or (Header.PatNum > MAX_PATTERNS)    then
-				Exit;
+		begin
+			Error('Failed sanity check!');
+			Exit;
+		end;
 
 		PtrListOffset := 192 + Header.OrdNum;
 
@@ -5639,7 +5976,7 @@ begin
 		for i := 0 to Header.InsNum-1 do
 		begin
 			Instruments[i].Free;
-			Ins := TInstrument.Create;
+			Ins := TITInstrument.Create;
 			Instruments[i] := Ins;
 
 			Stream.Seek(SP + InsPtrOffset + (i * 4), soBeginning);
@@ -5766,7 +6103,7 @@ begin
 
 			Stream.Seek(SP + SmpOffset + 4, soBeginning); // skip unwanted stuff
 
-			Sam := TSample.Create(Self);
+			Sam := TITSample.Create(Self);
 			Samples[i].Free; // precaution
 			Samples[i] := Sam;
 
@@ -5851,7 +6188,7 @@ begin
 			begin
 				if not Sam.LoadCompressedSample(Stream, Is16Bit, IsStereo, IsDeltaEncoded) then
 				begin
-					Debug('ERROR: LoadCompressedSample failed!');
+					Error('LoadCompressedSample failed!');
 					Exit;
 				end;
 			end
@@ -5923,7 +6260,7 @@ begin
 	except
 		on E:Exception do
 		begin
-			Debug('Error: ' + E.Message);
+			Error('Exception: ' + E.Message);
 			Exit(False);
 		end;
 	end;
@@ -5965,6 +6302,7 @@ var
 	S: AnsiString;
 begin
 	Result := False;
+	Error(''); // clear error reporting state
 
 	if Stream.Size >= 4+4 then
 	begin
@@ -5990,12 +6328,7 @@ begin
 
 		if Result then
 		begin
-			ChannelsUsed := 0;
-			for i := 0 to Header.PatNum-1 do
-				if Patterns[i] <> nil then
-					ChannelsUsed := Max(ChannelsUsed, Patterns[i].GetChannelCount);
-
-			Stop;
+			ModuleLoaded;
 			MixingVolume := Header.MixVolume;
 			Driver.FixSamples;
 		end;
@@ -6057,7 +6390,7 @@ procedure TITModule.FillAudioBuffer(Buffer: PInt16; NumSamples: Cardinal);
 begin
 	if Buffer = nil then Exit;
 
-	if (not Self.Playing) or (Driver = nil) then {or (WAVRender_Flag)}
+	if (not Playing) or (Driver = nil) then
 		FillDWord(Buffer, NumSamples, 0)
 	else
 	begin
@@ -6094,15 +6427,22 @@ begin
 	UnlockMixer;
 end;
 
-procedure TITModule.PreviousOrder;
+procedure TITModule.SeekTo(Order: Word);
 begin
-	if (not Playing) or (CurrentOrder < 1) then Exit;
+	if not Playing then Exit;
 
 	StopChannels;
-
 	LockMixer;
-	CurrentOrder -= 2;
-	ProcessOrder := CurrentOrder;
+
+	if Order < MAX_ORDERS then
+	begin
+		CurrentOrder := Order-1;
+		ProcessOrder := CurrentOrder;
+	end
+	else
+	if Order = SEEK_ORDER_PREV then
+		CurrentOrder -= 2;
+
 	ProcessRow   := $FFFE;
 	CurrentTick  := 1;
 	RowDelay     := 1;
@@ -6110,18 +6450,16 @@ begin
 	UnlockMixer;
 end;
 
+procedure TITModule.PreviousOrder;
+begin
+	if CurrentOrder > 0 then
+		SeekTo(SEEK_ORDER_PREV);
+end;
+
 procedure TITModule.NextOrder;
 begin
-	if (not Playing) or (CurrentOrder >= 255) then Exit;
-
-	StopChannels;
-
-	LockMixer;
-	ProcessRow   := $FFFE;
-	CurrentTick  := 1;
-	RowDelay     := 1;
-	RowDelayOn   := False;
-	UnlockMixer;
+	if CurrentOrder < MAX_ORDERS then
+		SeekTo(SEEK_ORDER_NEXT);
 end;
 
 procedure TITModule.Stop;
@@ -6131,6 +6469,7 @@ var
 	sc: TSlaveChannel;
 begin
 	Playing := False;
+	StopSong := True;
 
 	LockMixer;
 
@@ -6182,6 +6521,8 @@ begin
 end;
 
 function TITModule.Play(Order: Word): Boolean;
+var
+	i: Integer;
 begin
 	if Loaded then
 	begin
@@ -6201,6 +6542,10 @@ begin
 		MIDIInterpretState := 0;
 		MIDIInterpretType  := 0;
 
+		OrderVisited[0] := True;
+		for i := 1 to High(OrderVisited) do
+			OrderVisited[i] := False;
+
 		Driver.ResetMixer;
 
 		// don't try playing empty orderlist
@@ -6210,9 +6555,10 @@ begin
 		Playing := False;
 
 	Result := Playing;
+	StopSong := not Playing;
 
-	if (Result) and (Assigned(OnPlayback)) then
-		OnPlayback(Self, True);
+	if (not Rendering) and (Assigned(OnPlayback)) then
+		OnPlayback(Self, Result);
 end;
 
 procedure TITModule.FreeSong;
@@ -6262,6 +6608,12 @@ var
 begin
 	inherited Create;
 
+	Options.AutoReduceVolume := True;
+	Options.AutoCropOrderList := True;
+	Options.AutoFindSubSongs := False;
+	Options.AutoCalculateLength := False;
+	Options.AutoGetOptimumVolume := False;
+
 	InitCommandTable := [
 		@InitNoCommand, @InitCommandA,  @InitCommandB,  @InitCommandC,
 		@InitCommandD,  @InitCommandE,  @InitCommandF,  @InitCommandG,
@@ -6285,42 +6637,26 @@ begin
 	];
 
 	SongMessage := TStringList.Create;
-	EmptyPattern := TPattern.Create;
+	EmptyPattern := TITPattern.Create;
 
 	for i := 0 to MAX_SAMPLES-1 do
-		Samples[i] := TSample.Create(Self);
+		Samples[i] := TITSample.Create(Self);
 
 	for i := 0 to MAX_INSTRUMENTS-1 do
-		Instruments[i] := TInstrument.Create;
+		Instruments[i] := TITInstrument.Create;
 
 	Driver := nil;
 end;
 
-function TITModule.Init(DriverType: TAudioDriverType;
-	MixingFrequency: Word; MixingBufferSize: Cardinal = 0): Boolean;
+function TITModule.Init(MixingMode: TITAudioDriverType;
+	Frequency: Word; BufferSize: Cardinal = 0): Boolean;
 begin
-	if Driver <> nil then
-	begin
-		CloseMixer;
-		FreeAndNil(Driver);
-	end;
+	MixingFrequency  := Frequency;
+	MixingBufferSize := BufferSize;
 
-	if DriverType = DRIVER_DEFAULT then
-		DriverType := DRIVER_SB16MMX; // !!! update when adding better driver
-
-	case DriverType of
-		DRIVER_WAVWRITER: ;
-		DRIVER_SB16:      Driver := TITAudioDriver_SB16.Create(Self, MixingFrequency);
-		DRIVER_SB16MMX:   Driver := TITAudioDriver_SB16MMX.Create(Self, MixingFrequency);
-		DRIVER_HQ:        ;
-		else              ;
-	end;
-
-	Stop;
+	SetDriverType(MixingMode);
 
 	Result := (Driver <> nil);
-	if Result then
-		OpenMixer(MixingFrequency, MixingBufferSize);
 end;
 
 destructor TITModule.Destroy;
@@ -6342,7 +6678,7 @@ end;
 // ================================================================================================
 
 
-function TITModule.UpdateEnvelope(var env: TEnv; var envState: TEnvState; SustainReleased: Boolean): Boolean;
+function TITModule.UpdateEnvelope(var env: TITEnv; var envState: TITEnvState; SustainReleased: Boolean): Boolean;
 var
 	LoopBegin, LoopEnd: Byte;
 	Looping, HasLoop, HasSustainLoop: Boolean;
@@ -6412,7 +6748,7 @@ var
 	SustainReleased, HandleNoteFade, TurnOffCh: Boolean;
 	volume: Word;
 	PanVal, PanEnvVal: Int8;
-	ins: TInstrument;
+	ins: TITInstrument;
 	sc: TSlaveChannel;
 begin
 	for i := 0 to MAX_SLAVE_CHANNELS-1 do
@@ -6603,11 +6939,11 @@ begin
 	end;
 end;
 
-procedure TITModule.InitPlayInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TInstrument);
+procedure TITModule.InitPlayInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TITInstrument);
 var
 	pan, filterQ: Byte;
 	newPan: Int16;
-	S: TSample;
+	S: TITSample;
 	lastSC: TSlaveChannel;
 begin
 	Assert((hc <> nil) and (sc <> nil) and (ins <> nil));
@@ -6727,10 +7063,10 @@ begin
 	end;
 end;
 
-function TITModule.AllocateChannelInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TInstrument;
+function TITModule.AllocateChannelInstrument(hc: THostChannel; sc: TSlaveChannel; ins: TITInstrument;
 	var hcFlags: THostChannelFlags): TSlaveChannel;
 var
-	S: TSample;
+	S: TITSample;
 begin
 	Result := nil;
 	Assert((hc <> nil) and (sc <> nil) and (ins <> nil));
@@ -6783,9 +7119,9 @@ end;
 // ================================================================================================
 
 
-function TITModule.OpenMixer(MixingFrequency, MixingBufferSize: Word): Boolean;
+function TITModule.OpenMixer: Boolean;
 begin
-	if Assigned(OnOpenMixer) then
+	if (Driver <> nil) and (Assigned(OnOpenMixer)) then
 		Result := OnOpenMixer(Self, MixingFrequency, MixingBufferSize)
 	else
 		Result := False;
@@ -6794,14 +7130,14 @@ end;
 // disable or enable mixing while buffer is being processed
 procedure TITModule.LockMixer;
 begin
-	if Assigned(OnLockMixer) then
+	if (Driver <> nil) and (Assigned(OnLockMixer)) then
 		OnLockMixer(Self, True);
 end;
 
 // enables mixing again
 procedure TITModule.UnlockMixer;
 begin
-	if Assigned(OnLockMixer) then
+	if (Driver <> nil) and (Assigned(OnLockMixer)) then
 		OnLockMixer(Self, False);
 end;
 
@@ -6825,6 +7161,69 @@ begin
 	if Driver <> nil then
 		Driver.WaitFor;
 	Header.PanSep := Value;
+end;
+
+procedure TITModule.SetDriverType(NewDriver: TITAudioDriverType);
+type
+	TAudioDriverClass = Class of TITAudioDriver;
+
+	function GetDriverClass(TheDriver: TITAudioDriverType): TAudioDriverClass;
+	begin
+		Result := nil;
+
+		case TheDriver of
+			WavWriter: ;
+
+			SB16_NonInterpolated,
+			SB16_Interpolated:
+				Result := TITAudioDriver_SB16;
+
+			SB16_MMX_NonInterpolated,
+			SB16_MMX_Interpolated,
+			SB16_MMX_Ramped,
+			SB16_MMX_Filtered:
+				Result := TITAudioDriver_SB16MMX;
+
+			HighQuality:
+				Result := TITAudioDriver_HQ;
+		end;
+	end;
+
+var
+	WasPlaying: Boolean;
+	OldDriverClass,
+	NewDriverClass: TAudioDriverClass;
+begin
+	if FDriverType = NewDriver then Exit;
+
+	OldDriverClass := GetDriverClass(FDriverType);
+	NewDriverClass := GetDriverClass(NewDriver);
+
+	if NewDriverClass <> nil then
+	begin
+		FDriverType := NewDriver;
+
+		if (OldDriverClass = NewDriverClass) and (Driver <> nil) then
+		begin
+			Driver.SetMixingMode(NewDriver);
+		end
+		else
+		begin
+			WasPlaying := Playing;
+			Stop;
+
+			if Driver <> nil then
+			begin
+				CloseMixer;
+				Driver.Free;
+			end;
+
+			Driver := NewDriverClass.Create(Self, FDriverType, MixingFrequency);
+
+			OpenMixer;
+			if WasPlaying then Play;
+		end;
+	end;
 end;
 
 
