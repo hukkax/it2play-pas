@@ -9,17 +9,15 @@ Thanks to 8bitbubsy and muzzy for helping to debug this port!
 
 Current state:
 - Supports modules using samples or instruments, envelopes, filters, etc.
-- SB16 and SB16-MMX drivers implemented; choice of interpolation, volume ramping and filter support
+- HQ, SB16 and SB16-MMX drivers implemented; choice of interpolation, volume ramping and filter support
 - Lots of low-level bit twiddling making the code fast but ugly
 - Some bugs likely due to porting mishaps. No AI help used.
 
 Partial TODO:
-- Example projects
-- 8bitbubsy's HQ driver
 - WAV writer
 - Support for MMCMP compressed modules
 - Refactor for more Object Pascalish code
 - Test against all the OpenMPT IT tests
 
 Bugs:
-- Filter routines may need tweaking
+- SB16-MMX filter routines may need tweaking
