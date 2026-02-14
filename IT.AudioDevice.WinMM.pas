@@ -56,28 +56,34 @@ begin
 end;
 
 
-function MixThread(Buf: Pointer): Ptrint;
+function MixThread(PAudioDeviceBuffer: Pointer): Ptrint;
 var
-	Info: TITAudioDeviceBuffer;
+	Info:   TITAudioDeviceBuffer;
+	Module: TITModule;
+	OK:     Boolean;
 begin
 	Result := 0;
 	SetThreadPriority(GetCurrentThread, THREAD_PRIORITY_TIME_CRITICAL);
 
+	Info := TITAudioDeviceBuffer(PAudioDeviceBuffer);
+	OK := (Info <> nil) and (Info.Module <> nil);
+	if OK then
+		Module := Info.Module
+	else
+		Module := nil;
+
 	while MixerOpened do
 	begin
-		Info := TITAudioDeviceBuffer(Buf);
-		if (Info = nil) or (Info.Module = nil) then Exit;
+		MixerBusy := True;
 
-		if (not MixerLocked) and (Info.Module.Playing) then
-		begin
-			MixerBusy := True;
-			Info.Module.FillAudioBuffer(@AudioBuffer[CurrBuffer][0], BufferSize);
-		end
+		if (OK) and (not MixerLocked) and (Module.Playing) and (not Module.MixerLocked) then
+			Module.FillAudioBuffer(@AudioBuffer[CurrBuffer][0], BufferSize)
 		else
 			FillDWord(AudioBuffer[CurrBuffer][0], BufferSize, 0);
 
 		// copy the filled audio buffer for visualization
-		CopyMemory(@Info.Data[0], @AudioBuffer[CurrBuffer][0], BufferSize*4);
+		if Info <> nil then
+			CopyMemory(@Info.Data[0], @AudioBuffer[CurrBuffer][0], BufferSize*4);
 
 		MixerBusy := False;
 
@@ -109,7 +115,7 @@ begin
 
 	// note that MixingBufferSize will be zero if we didn't specify it in the Init() call!
 	if MixingBufferSize = 0 then
-		MixingBufferSize := 1024*4; // !!!
+		MixingBufferSize := 512*4; // !!!
 	if MixingBufferSize > Length(Buffer.Data) then
 		SetLength(Buffer.Data, MixingBufferSize);
 
@@ -172,8 +178,10 @@ end;
 
 procedure TITAudioDevice_WinMM.Lock;
 begin
+	if MixerLocked then Exit;
+
 	MixerLocked := True;
-	while MixerBusy do;
+	while MixerBusy do; // !!!
 end;
 
 procedure TITAudioDevice_WinMM.Unlock;
