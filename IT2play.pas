@@ -487,6 +487,11 @@ type
 	TMixerBoolEvent    = procedure(Module: TITModule; Value: Boolean) of Object;
 	TMixerOpenEvent    = function(Module: TITModule; MixingFrequency, MixingBufferSize: Cardinal): Boolean of Object;
 
+	TITEditorTimeStamp = record
+		Raw: Cardinal;
+		Year, Month, Day, Hour, Minute: Word;
+	end;
+
 	TITModule = class
 	type
 		TCommandProc = procedure(hc: THostChannel) of Object;
@@ -687,6 +692,8 @@ type
 		{Patterns: TObjectList<TITPattern>;
 		Instruments: TObjectList<TITInstrument>;
 		Samples: TObjectList<TITSample>;}
+
+		EditorTimeStamps: array of TITEditorTimeStamp;
 
 		SongMessage: TStringList;
 		//SongMessage: array [0..MAX_SONGMSG_LENGTH] of AnsiChar; // 8bb: +1 to fit protection-NUL
@@ -5921,7 +5928,8 @@ var
 	i, j, k: Integer;
 	offset, PtrListOffset, PatPtrOffset,
 	SmpPtrOffset, SmpOffset,
-	InsPtrOffset, InsOffset: Cardinal;
+	InsPtrOffset, InsOffset,
+	TimeStamp: Cardinal;
 	B, IsStereo, IsCompressed, Is16Bit, IsSignedSamples, IsDeltaEncoded: Boolean;
 	PatLength, PatRows, W: Word;
 	Pattern: TITPattern;
@@ -5989,14 +5997,28 @@ begin
 		Stream.Seek(SP + 192 + Header.OrdNum +
 			((Header.InsNum + Header.SmpNum + Header.PatNum) * 4), soBeginning);
 
-		// skip time data, if present
+		// read editor timestamps if present
 		if (Header.Special and 2) <> 0 then
 		begin
 			offset := Stream.ReadWord;
 			if offset > 0 then
 			begin
-				DebugInfo('Skipping time data, ' + offset.ToSTring + ' bytes');
-				Stream.Seek(offset * 8, soCurrent);
+				SetLength(EditorTimeStamps, offset);
+				for i := 0 to offset-1 do
+				begin
+					TimeStamp := Stream.ReadWord shl 16 + Stream.ReadWord;
+					Stream.ReadDWord; // skip DOS timer
+					with EditorTimeStamps[i] do
+					begin
+						// not checked for validity
+						Raw := TimeStamp;
+						TimeStamp := TimeStamp >> 5; Minute := TimeStamp and 63;
+						TimeStamp := TimeStamp >> 6; Hour   := TimeStamp and 31;
+						TimeStamp := TimeStamp >> 5; Day    := TimeStamp and 31;
+						TimeStamp := TimeStamp >> 5; Month  := TimeStamp and 15;
+						TimeStamp := TimeStamp >> 4; Year   := TimeStamp + 1980;
+					end;
+				end;
 			end;
 		end;
 
@@ -6351,7 +6373,10 @@ var
 	S: AnsiString;
 begin
 	Result := False;
-	Error(''); // clear error reporting state
+
+	if Loaded then
+		FreeSong;
+
 	InStream := Stream;
 
 	if Stream.Size >= 4+4 then
@@ -6387,9 +6412,6 @@ function TITModule.LoadFromFile(const Filename: String): Boolean;
 var
 	Stream: TFileStream;
 begin
-	if Loaded then
-		FreeSong;
-
 	Result := False;
 	try
 		Stream := TFileStream.Create(Filename, fmOpenRead);
@@ -6612,7 +6634,10 @@ begin
 	Stop;
 	Loaded := False;
 
+	Error(''); // clear error reporting state
+
 	SongMessage.Clear;
+	SetLength(EditorTimeStamps, 0);
 
 	for i := 0 to MAX_HOST_CHANNELS-1 do
 		FreeAndNil(HostChannels[i]);

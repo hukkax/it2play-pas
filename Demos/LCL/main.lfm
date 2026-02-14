@@ -9,6 +9,7 @@ object MainForm: TMainForm
   ClientWidth = 855
   KeyPreview = True
   Position = poScreenCenter
+  LCLVersion = '4.0.0.4'
   OnDestroy = FormDestroy
   OnDropFiles = FormDropFiles
   OnShow = FormShow

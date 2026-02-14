@@ -262,6 +262,16 @@ begin
 			Lines.Add(Format('Compatible Gxx: %s', [IfThen(Module.Header.Flags.ITF_COMPAT_GXX,  'Yes', 'No')]));
 			Lines.Add(Format('Filter ranges:  %s', [IfThen(Module.Header.Flags.ITF_EXTENDED_FILTER_RANGE,  'Extended (MPT)', 'Normal')]));
 
+			if Length(Module.EditorTimeStamps) > 0 then
+			begin
+				Lines.Add('Edit history timestamps:');
+				for i := 0 to Length(Module.EditorTimeStamps)-1 do
+				with Module.EditorTimeStamps[i] do
+				begin
+					Lines.Add(Format('* %.4d-%.2d-%.2d %.2d:%.2d', [ Year, Month, Day, Hour, Minute ]));
+				end;
+			end;
+
 			if Module.Header.MessageLength > 0 then
 			begin
 				Lines.Add('Song message:');
