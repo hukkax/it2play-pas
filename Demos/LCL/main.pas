@@ -360,7 +360,7 @@ var
 	S: TITSample;
 	P16: PInt16;
 	P8:  PInt8;
-	Chan: Boolean;
+	Is16Bit, Chan: Boolean;
 begin
 	pbSample.Canvas.Clear;
 
@@ -374,48 +374,36 @@ begin
 	S := TITSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
 	if (S = nil) or (S.Length < 2) or (not S.Flags.SMPF_ASSOCIATED_WITH_HEADER) then Exit;
 
-	if S.Flags.SMPF_16BIT then
+	Is16Bit := S.Flags.SMPF_16BIT;
+	if Is16Bit then
 		D := (S.Length-1) / W  // 16-bit
 	else
 		D := (S.Length-1) / W; // 8-bit
-
 	if S.IsStereo then
-		H := H div 2; // waveform height for one channel
-
-	OSY := 0;
-	DY := H div 2;
-
-	if S.Flags.SMPF_16BIT then
 	begin
-		for Chan := False to S.IsStereo do
-		begin
-			F := 0;
-			P16 := S.Data[Chan].Data;
-			pbSample.Canvas.PenPos := Point(0, OSY);
-			for X := 0 to W-1 do
-			begin
-				Y := Trunc(P16[Trunc(F)] / 65536 * (H-1)) + OSY;
-				F += D;
-				pbSample.Canvas.LineTo(X, H-Y+DY);
-			end;
-			OSY += H;
-		end;
+		H := H div 2; // waveform height for one channel
+		OSY := 0;
 	end
 	else
+		OSY := H;
+	DY := H div 2;
+
+	for Chan := False to S.IsStereo do
 	begin
-		for Chan := False to S.IsStereo do
+		F := 0;
+		P16 := S.Data[Chan].Data;
+		P8  := S.Data[Chan].Data;
+		pbSample.Canvas.PenPos := Point(0, H-OSY+DY);
+		for X := 0 to W-1 do
 		begin
-			F := 0;
-			P8  := S.Data[Chan].Data;
-			pbSample.Canvas.PenPos := Point(0, OSY);
-			for X := 0 to W-1 do
-			begin
-				Y := Trunc(P8[Trunc(F)] / 256 * (H-1)) + OSY;
-				F += D;
-				pbSample.Canvas.LineTo(X, H-Y+DY);
-			end;
-			OSY += H;
+			if Is16Bit then
+				Y := Trunc(P16[Trunc(F)] / 65536 * (H-1)) + OSY
+			else
+				Y := Trunc(P8 [Trunc(F)] / 256   * (H-1)) + OSY;
+			pbSample.Canvas.LineTo(X, H-Y+DY);
+			F += D;
 		end;
+		OSY += H;
 	end;
 end;
 
