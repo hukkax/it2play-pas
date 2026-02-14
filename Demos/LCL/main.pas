@@ -253,6 +253,7 @@ begin
 			Lines.Add(Format('Pitch slides:   %s', [IfThen(Module.Header.Flags.ITF_LINEAR_FRQ,  'Linear', 'Amiga')]));
 			Lines.Add(Format('Old effects:    %s', [IfThen(Module.Header.Flags.ITF_OLD_EFFECTS, 'Yes', 'No')]));
 			Lines.Add(Format('Compatible Gxx: %s', [IfThen(Module.Header.Flags.ITF_COMPAT_GXX,  'Yes', 'No')]));
+			Lines.Add(Format('Filter ranges:  %s', [IfThen(Module.Header.Flags.ITF_EXTENDED_FILTER_RANGE,  'Extended (MPT)', 'Normal')]));
 
 			if Module.Header.MessageLength > 0 then
 			begin
