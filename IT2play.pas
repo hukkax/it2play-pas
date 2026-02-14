@@ -1214,21 +1214,6 @@ begin
 	Module := AModule;
 	MixMode := 255; // uninitialized default
 	MixFrequency := MixingFrequency;
-
-	// pre-calc filter coeff tables (bit-accurate)
-	(*
-	if Flags.DF_HAS_RESONANCE_FILTER then
-	begin
-		for i := 0 to 127 do
-			QualityFactorTable[i] := Power(10, (-i * 24) / (128 * 20));
-
-		// -1/(24*256) (8bb: w/ small rounding error!)
-		FreqParameterMultiplier := -0.000162760407;
-
-		// 1/(2*PI*110.0*2^0.25) * MixingFrequency
-		FreqMultiplier := 0.00121666200 * MixingFrequency;
-	end;
-	*)
 end;
 
 procedure TITAudioDriver.ResetMixer;
@@ -3527,8 +3512,7 @@ begin
 				sc.Note := hc.TranslatedNote;
 
 			s := sc.Sample;
-
-			hc.PortaFreq := Int32(s.C5Speed * PitchTable[hc.TranslatedNote]) >> 16; // !!! cast?
+			hc.PortaFreq := UInt64(s.C5Speed * PitchTable[hc.TranslatedNote]) >> 16;
 			hc.Flags.HF_PITCH_SLIDE_ONGOING := True;
 		end
 		else
@@ -5698,6 +5682,21 @@ var
 	FilterStep: Double;
 begin
 	if (Driver = nil) or (not Driver.Flags.DF_HAS_RESONANCE_FILTER) then Exit;
+
+	// original implementation to pre-calc filter coeff tables (bit-accurate)
+	(*
+	if Flags.DF_HAS_RESONANCE_FILTER then
+	begin
+		for i := 0 to 127 do
+			QualityFactorTable[i] := Power(10, (-i * 24) / (128 * 20));
+
+		// -1/(24*256) (8bb: w/ small rounding error!)
+		FreqParameterMultiplier := -0.000162760407;
+
+		// 1/(2*PI*110.0*2^0.25) * MixingFrequency
+		FreqMultiplier := 0.00121666200 * MixingFrequency;
+	end;
+	*)
 
 	if (Header.Flags.ITF_EXTENDED_FILTER_RANGE) and (Driver.Flags.DF_SUPPORTS_EXTENDED_FILTER_RANGE) then
 		FilterStep := 20  // MPT in "extended filter range" mode
