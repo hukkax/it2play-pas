@@ -10,6 +10,7 @@ Thanks to 8bitbubsy and muzzy for helping to debug this port!
 Current state:
 - Supports modules using samples or instruments, envelopes, filters, etc.
 - HQ, SB16 and SB16-MMX drivers implemented; choice of interpolation, volume ramping and filter support
+- MPT extended filter ranges supported in HQ driver
 - Lots of low-level bit twiddling making the code fast but ugly
 - Some bugs likely due to porting mishaps. No AI help used.
 
