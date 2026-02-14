@@ -68,12 +68,15 @@ end;
 
 procedure TITAudioDevice_SDL3.Lock;
 begin
+	if not EnableMixing then Exit;
+
 	EnableMixing := False;
 	while MixerBusy do;
 end;
 
 procedure TITAudioDevice_SDL3.Unlock;
 begin
+	MixerBusy := False;
 	EnableMixing := True;
 end;
 
