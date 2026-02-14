@@ -355,11 +355,12 @@ end;
 
 procedure TMainForm.pbSamplePaint(Sender: TObject);
 var
-	X, Y, W, H: Integer;
+	X, Y, W, H, DY, OSY: Integer;
 	F, D: Double;
 	S: TITSample;
 	P16: PInt16;
 	P8:  PInt8;
+	Chan: Boolean;
 begin
 	pbSample.Canvas.Clear;
 
@@ -367,37 +368,53 @@ begin
 
 	W := pbSample.ClientWidth;
 	H := pbSample.ClientHeight;
-	F := 0;
 
-	pbSample.Canvas.PenPos := Point(0, H div 2);
 	pbSample.Canvas.Pen.Color := clBtnText;
 
 	S := TITSample(lbSamples.Items.Objects[lbSamples.ItemIndex]);
 	if (S = nil) or (S.Length < 2) or (not S.Flags.SMPF_ASSOCIATED_WITH_HEADER) then Exit;
 
 	if S.Flags.SMPF_16BIT then
-		D := (S.Length-1) / W
+		D := (S.Length-1) / W  // 16-bit
 	else
-		D := (S.Length-1) / W;
+		D := (S.Length-1) / W; // 8-bit
+
+	if S.IsStereo then
+		H := H div 2; // waveform height for one channel
+
+	OSY := 0;
+	DY := H div 2;
 
 	if S.Flags.SMPF_16BIT then
 	begin
-		P16 := S.Data[False].Data;
-		for X := 0 to W-1 do
+		for Chan := False to S.IsStereo do
 		begin
-			Y := Trunc(P16[Trunc(F)] / 65536 * (H-1)) + (H div 2);
-			F += D;
-			pbSample.Canvas.LineTo(X, H-Y);
+			F := 0;
+			P16 := S.Data[Chan].Data;
+			pbSample.Canvas.PenPos := Point(0, OSY);
+			for X := 0 to W-1 do
+			begin
+				Y := Trunc(P16[Trunc(F)] / 65536 * (H-1)) + OSY;
+				F += D;
+				pbSample.Canvas.LineTo(X, H-Y+DY);
+			end;
+			OSY += H;
 		end;
 	end
 	else
 	begin
-		P8  := S.Data[False].Data;
-		for X := 0 to W-1 do
+		for Chan := False to S.IsStereo do
 		begin
-			Y := Trunc(P8[Trunc(F)] / 256 * (H-1)) + (H div 2);
-			F += D;
-			pbSample.Canvas.LineTo(X, H-Y);
+			F := 0;
+			P8  := S.Data[Chan].Data;
+			pbSample.Canvas.PenPos := Point(0, OSY);
+			for X := 0 to W-1 do
+			begin
+				Y := Trunc(P8[Trunc(F)] / 256 * (H-1)) + OSY;
+				F += D;
+				pbSample.Canvas.LineTo(X, H-Y+DY);
+			end;
+			OSY += H;
 		end;
 	end;
 end;
