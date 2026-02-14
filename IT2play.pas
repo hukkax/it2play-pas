@@ -46,8 +46,8 @@ const
 	MAX_PATTERNS       = 200;
 	MAX_ORDERS         = 256;
 	MAX_ROWS           = 200;
-	MAX_SAMPLES        = 100;
-	MAX_INSTRUMENTS    = 100;
+	MAX_SAMPLES        = 256; //100;
+	MAX_INSTRUMENTS    = 256; //100;
 	MAX_HOST_CHANNELS  = 64;
 	MAX_SLAVE_CHANNELS = 256;
 	MAX_SONGMSG_LENGTH = 8000;
@@ -127,8 +127,14 @@ type
 		FORMAT_MOD     = 3
 	);
 
-	{$DEFINE TBitFlags8:=bitpacked record case Boolean of False: (ByteAccess: Byte); True: }
-	{$DEFINE TBitFlags16:=bitpacked record case Boolean of False: (WordAccess: Word); True: }
+	{$DEFINE TBitFlags8  := bitpacked record
+		case Boolean of
+			False: ( ByteAccess: Byte );
+			True: }
+	{$DEFINE TBitFlags16 := bitpacked record
+		case Boolean of
+			False: ( WordAccess: Word );
+			True: }
 
 	TITModule = class;
 
@@ -246,17 +252,17 @@ type
 	TSlaveChannel = class;
 
 	THostChannelFlags = TBitFlags16(
-		HF_UPDATE_EFX_IF_CHAN_ON,
-		HF_ALWAYS_UPDATE_EFX,
-		HF_CHAN_ON,
-		HF_CHAN_CUT,         // No longer implemented
-		HF_PITCH_SLIDE_ONGOING,
-		HF_FREEPLAY_NOTE,    // 8bb: Only needed for tracker. Logic removed.
-		HF_ROW_UPDATED,
-		HF_APPLY_RANDOM_VOL,
-		HF_UPDATE_VOLEFX_IF_CHAN_ON,
-		HF_ALWAYS_VOLEFX:    Boolean;
-	);
+		HF_UPDATE_EFX_IF_CHAN_ON,    // 1
+		HF_ALWAYS_UPDATE_EFX,        // 2
+		HF_CHAN_ON,                  // 4
+		HF_CHAN_CUT,                 // 8  - No longer implemented
+		HF_PITCH_SLIDE_ONGOING,      // 16
+		HF_FREEPLAY_NOTE,            // 32 - Only needed for tracker. Logic removed.
+		HF_ROW_UPDATED,              // 64
+		HF_APPLY_RANDOM_VOL,         // 128
+		HF_UPDATE_VOLEFX_IF_CHAN_ON, // 256
+		HF_ALWAYS_VOLEFX
+		: Boolean; );
 	end;
 
 	THostChannel = class
@@ -320,8 +326,8 @@ type
 			SF_VOLENV_ON,
 			SF_PANENV_ON,
 			SF_PITCHENV_ON,
-			SF_PAN_CHANGED: Boolean;
-		);
+			SF_PAN_CHANGED
+			: Boolean; );
 		end;
 
 		Instrument:  TITInstrument;
@@ -374,8 +380,9 @@ type
 	type
 		TITAudioDriverFlags = record
 			DF_SUPPORTS_MIDI,
-			DF_USES_VOLRAMP,        // 8bb: aka. "hiqual"
-			DF_HAS_RESONANCE_FILTER // 8bb: added this
+			DF_USES_VOLRAMP,
+			DF_HAS_RESONANCE_FILTER,
+			DF_SUPPORTS_EXTENDED_FILTER_RANGE
 			: Boolean;
 		end;
 	protected
@@ -385,9 +392,9 @@ type
 		BytesToMix, MixTransferRemaining, MixTransferOffset: Integer;
 		NumChannels: Cardinal;
 
-		MixMode:   Byte;
-		MixVolume: Word;
-		MixSpeed:  Cardinal;
+		MixMode:       Byte;
+		MixVolume:     Word;
+		MixFrequency:  Cardinal;
 
 		FilterParameters:   array [0..127] of Byte;
 		QualityFactorTable: array [0..127] of Float;
@@ -450,15 +457,20 @@ type
 
 	TITHeader = record
 		Flags: TBitFlags16(
-			ITF_STEREO,
-			ITF_VOL0_OPTIMIZATION, // 8bb: not used in IT1.04 and later
-			ITF_INSTR_MODE,
-			ITF_LINEAR_FRQ,
-			ITF_OLD_EFFECTS,
-			ITF_COMPAT_GXX,
-			ITF_USE_MIDI_PITCH_CNTRL,
-			ITF_REQ_MIDI_CFG:   Boolean;
-		);
+			ITF_STEREO,               // 1
+			ITF_VOL0_OPTIMIZATION,    // 2  - not used in IT1.04 and later
+			ITF_INSTR_MODE,           // 4
+			ITF_LINEAR_FRQ,           // 8
+			ITF_OLD_EFFECTS,          // 16
+			ITF_COMPAT_GXX,           // 32
+			ITF_USE_MIDI_PITCH_CNTRL, // 64
+			ITF_REQ_MIDI_CFG,         // 128
+			ITF_UNUSED_1,             // 256
+			ITF_UNUSED_2,             // 512
+			ITF_UNUSED_3,             // 1024
+			ITF_UNUSED_4,             // 2048
+			ITF_EXTENDED_FILTER_RANGE // 4096
+			: Boolean; );
 		end;
 		SongName: String[25];
 		OrdNum, InsNum, SmpNum, PatNum, Cwtv, Cmwt, Special,
@@ -628,6 +640,7 @@ type
 		function  RandomNumber: Byte;
 
 		procedure RecalculateAllVolumes;
+		procedure CalculateFilterTables(Frequency: Cardinal);
 		procedure InitTempo;
 		function  FindFreeSlaveChannel: TSlaveChannel;
 
@@ -770,6 +783,7 @@ const
 implementation
 
 uses
+	Decompress.MMCMP,
 	IT.AudioDriver.HQ,
 	IT.AudioDriver.SB16,
 	IT.AudioDriver.SB16MMX;
@@ -1198,9 +1212,10 @@ begin
 
 	Module := AModule;
 	MixMode := 255; // uninitialized default
-	MixSpeed := MixingFrequency;
+	MixFrequency := MixingFrequency;
 
 	// pre-calc filter coeff tables (bit-accurate)
+	(*
 	if Flags.DF_HAS_RESONANCE_FILTER then
 	begin
 		for i := 0 to 127 do
@@ -1212,6 +1227,7 @@ begin
 		// 1/(2*PI*110.0*2^0.25) * MixingFrequency
 		FreqMultiplier := 0.00121666200 * MixingFrequency;
 	end;
+	*)
 end;
 
 procedure TITAudioDriver.ResetMixer;
@@ -1248,7 +1264,7 @@ begin
 	if Tempo < LOWEST_BPM_POSSIBLE then
 		Tempo := LOWEST_BPM_POSSIBLE;
 
-	BytesToMix := ((MixSpeed * 2) + (MixSpeed div 2)) div Tempo;
+	BytesToMix := ((MixFrequency * 2) + (MixFrequency div 2)) div Tempo;
 
 	if (Module <> nil) and (Assigned(Module.OnTempoChange)) then
 		Module.OnTempoChange(Module);
@@ -1365,7 +1381,7 @@ begin
 
 	MixingFrequency := Max(MixingFrequency, 8000);
 	MixingFrequency := Min(MixingFrequency, 64000);
-	MixSpeed := MixingFrequency;
+	MixFrequency := MixingFrequency;
 	MaxSamplesToMix := ((MixingFrequency * 2) + (MixingFrequency div 2)) div LOWEST_BPM_POSSIBLE + 1;
 	SetLength(MixBuffer, MaxSamplesToMix * 2);
 
@@ -2221,22 +2237,14 @@ begin
 					if NewOrder >= MAX_ORDERS then
 					begin
 						NewOrder := 0;
-						StopSong := True;
 						Continue;
 					end;
 
 					NewPattern := Orders[NewOrder]; // next pattern
 
-					if NewPattern >= Header.PatNum then
-					begin
-						NewOrder := 0;
-						StopSong := True;
-						Continue;
-					end;
-
 					if NewPattern >= MAX_PATTERNS then
 					begin
-						if NewPattern = $FE then // 8bb: skip pattern separator
+						if NewPattern = $FE then // skip pattern separator
 							Inc(NewOrder)
 						else
 						begin
@@ -2254,11 +2262,12 @@ begin
 				ProcessOrder := NewOrder;
 				if NewOrder <> CurrentOrder then
 				begin
-					if OrderVisited[NewOrder] then
-						StopSong := True;
-					OrderVisited[NewOrder] := True;
-
 					CurrentOrder := NewOrder;
+
+					if OrderVisited[NewOrder] then
+						StopSong := True
+					else
+						OrderVisited[NewOrder] := True;
 
 					if Assigned(OnOrderChange) then
 						OnOrderChange(Self);
@@ -5682,6 +5691,25 @@ begin
 	Result := True;
 end;
 
+procedure TITModule.CalculateFilterTables(Frequency: Cardinal);
+var
+	i: Integer;
+	FilterStep: Double;
+begin
+	if (Driver = nil) or (not Driver.Flags.DF_HAS_RESONANCE_FILTER) then Exit;
+
+	if (Header.Flags.ITF_EXTENDED_FILTER_RANGE) and (Driver.Flags.DF_SUPPORTS_EXTENDED_FILTER_RANGE) then
+		FilterStep := 20  // MPT in "extended filter range" mode
+	else
+		FilterStep := 24; // IT2
+
+	for i := 0 to 127 do
+		Driver.QualityFactorTable[i] := Power(10, (-i * FilterStep) / (128 * 20));
+
+	Driver.FreqParameterMultiplier := -1 / (FilterStep * 256);
+	Driver.FreqMultiplier          := (1 / (2 * PI * 110 * Power(2, 0.25))) * Frequency;
+end;
+
 procedure TITModule.CropOrderList;
 var
 	i: Integer;
@@ -5816,6 +5844,12 @@ begin
 			end;
 		end;
 	end;
+
+	MixingVolume := Header.MixVolume;
+
+	Driver.FixSamples;
+
+	CalculateFilterTables(Driver.MixFrequency);
 
 	if Assigned(OnLoaded) then
 		OnLoaded(Self);
@@ -6297,12 +6331,13 @@ function TITModule.LoadFromStream(Stream: TStream): Boolean;
 const
 	mmcmpstr = 'ziRCONia';
 var
-	i: Integer;
 	//WasCompressed: Boolean = False;
+	InStream: TStream;
 	S: AnsiString;
 begin
 	Result := False;
 	Error(''); // clear error reporting state
+	InStream := Stream;
 
 	if Stream.Size >= 4+4 then
 	begin
@@ -6311,27 +6346,23 @@ begin
 		Stream.Read(S[1], 8);
 		if S = mmcmpStr then
 		begin
-			Debug('Compression not supported');
-			{if UnpackMMCMP(Stream) then
-				Result := True;
-			else}
+			if not UnpackMMCMP(Stream) then //, InStream) then
+			begin
+				Error('MMCMP decompression failed');
 				Exit;
+			end;
 		end;
 
 		SetDefaultMIDIDataArea;
 
-		Stream.Seek(0, soBeginning);
-		case GetModuleType(Stream) of
-			FORMAT_IT:  Result := LoadIT(Stream);
-			FORMAT_S3M: Result := LoadS3M(Stream);
+		InStream.Seek(0, soBeginning);
+		case GetModuleType(InStream) of
+			FORMAT_IT:  Result := LoadIT (InStream);
+			FORMAT_S3M: Result := LoadS3M(InStream);
 		end;
 
 		if Result then
-		begin
 			ModuleLoaded;
-			MixingVolume := Header.MixVolume;
-			Driver.FixSamples;
-		end;
 	end;
 
 	Loaded := Result;
