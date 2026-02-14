@@ -48,7 +48,12 @@
             </Options>
           </Linking>
           <Other>
-            <CustomOptions Value="-dDEBUGLOG"/>
+            <CustomOptions Value="-OoFASTMATH
+-OoCSE
+-OoLOOPUNROLL
+-OoORDERFIELDS
+-OoREMOVEEMPTYPROCS
+-Si"/>
             <OtherDefines Count="2">
               <Define0 Value="DEBUG"/>
               <Define1 Value="DEBUGLOG"/>
@@ -82,6 +87,10 @@
         <ResourceBaseClass Value="Form"/>
         <UnitName Value="Main"/>
       </Unit>
+      <Unit>
+        <Filename Value="..\..\Decompress.MMCMP.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -112,7 +121,8 @@
       </Debugging>
     </Linking>
     <Other>
-      <CustomOptions Value="-dDEBUGLOG"/>
+      <CustomOptions Value="-OoFASTMATH
+-dDEBUGLOG"/>
       <OtherDefines Count="2">
         <Define0 Value="DEBUG"/>
         <Define1 Value="DEBUGLOG"/>
