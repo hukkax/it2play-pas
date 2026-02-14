@@ -241,10 +241,12 @@ type
 
 		Data: array[Boolean] of TSampleData;
 
-		procedure AllocateSample(NewLength: Cardinal; Is16Bit, IsStereo: Boolean);
+		function  IsStereo: Boolean; inline;
+
+		procedure AllocateSample(NewLength: Cardinal; Is16Bit, Stereo: Boolean);
 		procedure ReleaseSample;
 
-		function  LoadCompressedSample(Stream: TStream; Is16Bit, IsStereo, IsDeltaEncoded: Boolean): Boolean;
+		function  LoadCompressedSample(Stream: TStream; Is16Bit, Stereo, IsDeltaEncoded: Boolean): Boolean;
 
 		constructor Create(AModule: TITModule);
 	end;
@@ -430,6 +432,7 @@ type
 		procedure ResetMixer; virtual;
 		procedure Mix(NumSamples: Integer; AudioOut: PInt16); virtual; abstract;
 		procedure FixSamples; virtual; abstract;
+		procedure SongLoaded; virtual;
 
 		property  MixingMode: TITAudioDriverType write SetMixingMode;
 
@@ -888,7 +891,7 @@ end;
 // TITSample
 // ================================================================================================
 
-procedure TITSample.AllocateSample(NewLength: Cardinal; Is16Bit, IsStereo: Boolean);
+procedure TITSample.AllocateSample(NewLength: Cardinal; Is16Bit, Stereo: Boolean);
 var
 	IsRightSample: Boolean;
 begin
@@ -896,9 +899,9 @@ begin
 	if Is16Bit then NewLength *= 2;
 
 	DebugInfo(Format('AllocateSample(%d, 16bit=%d, Stereo=%d)',
-		[NewLength, BoolToInt[is16bit], BoolToInt[isstereo]]));
+		[NewLength, BoolToInt[is16bit], BoolToInt[stereo]]));
 
-	for IsRightSample := False to IsStereo do
+	for IsRightSample := False to Stereo do
 	begin
 		// 8bb: extra bytes for interpolation taps, filled later
 		SetLength(Data[IsRightSample].OrigData, NewLength + SAMPLE_PAD_LENGTH);
@@ -1123,8 +1126,13 @@ begin
 	end;
 end;
 
+function TITSample.IsStereo: Boolean;
+begin
+	Result := Data[True].Data <> nil;
+end;
+
 function TITSample.LoadCompressedSample(Stream: TStream;
-	Is16Bit, IsStereo, IsDeltaEncoded: Boolean): Boolean;
+	Is16Bit, Stereo, IsDeltaEncoded: Boolean): Boolean;
 var
 	Chan: Boolean;
 	DstPtr: PInt8;
@@ -1139,9 +1147,11 @@ begin
 	if Stream = nil then Exit;
 
 	DebugInfo(Format('LoadCompressedSample(16bit=%d, Stereo=%d, Delta=%d)',
-		[BoolToInt[is16bit], BoolToInt[isstereo], BoolToInt[IsDeltaEncoded]]));
+		[BoolToInt[is16bit], BoolToInt[stereo], BoolToInt[IsDeltaEncoded]]));
 
-	for Chan := False to IsStereo do
+	Data[True].Data := nil;
+
+	for Chan := False to Stereo do
 	begin
 		DstPtr := Data[Chan].Data;
 		i := Length;
@@ -1222,6 +1232,11 @@ begin
 	MixTransferRemaining := 0;
 	MixTransferOffset := 0;
 	SetMixVolume(Module.Header.MixVolume);
+end;
+
+procedure TITAudioDriver.SongLoaded;
+begin
+	FixSamples;
 end;
 
 // wait until mixing for current block has finished
@@ -5847,7 +5862,7 @@ begin
 
 	MixingVolume := Header.MixVolume;
 
-	Driver.FixSamples;
+	Driver.SongLoaded;
 
 	CalculateFilterTables(Driver.MixFrequency);
 

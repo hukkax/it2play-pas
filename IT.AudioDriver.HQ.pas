@@ -44,6 +44,7 @@ type
 	private
 		SincLUT: array of Float;
 
+		MixGain: Float;
 		RealBytesToMix, FreqMulVal: Integer;
 		BytesToMixFractional, CurrentFractional, RandSeed: Cardinal;
 		SamplesPerTickInt, SamplesPerTickFrac: array [0..256-LOWEST_BPM_POSSIBLE-1] of Cardinal;
@@ -71,12 +72,15 @@ type
 		procedure MixFilteredSurround16BitStereo(sc: TSlaveChannel; MixBufPtr: PFloat; NumSamples: Cardinal);
 
 		procedure InitWindowedSincLUT;
+		procedure SetMixGain;
 	public
 		procedure SetTempo(Tempo: Byte); override;
 		procedure ResetMixer; override;
 		procedure FixSamples; override;
 		procedure MixSamples; override;
 		procedure Mix(NumSamples: Integer; AudioOut: PInt16); override;
+
+		procedure SongLoaded; override;
 
 		function  PostMix(AudioOut16: PInt16; SamplesLeft: Integer; {%H-}SampleShiftValue: Byte = 0): Integer; override;
 
@@ -92,8 +96,9 @@ implementation
 	smp  := base + sc.SamplingPosition; }
 
 {$DEFINE GetSamplePtrsStereo :=
-	GetSamplePtrs;
-	smpR := sc.Sample.Data[True].Data + sc.SamplingPosition; }
+	base := sc.Sample.Data[True].Data;
+	smpR := base + sc.SamplingPosition;
+	GetSamplePtrs; }
 
 {$DEFINE GetSincLUT := @SincLUT[(sc.Frac64 >> SINC_FSHIFT and UINT32_MAX) and SINC_FMASK] }
 
@@ -124,8 +129,8 @@ implementation
 {$DEFINE FilterStereoSample :=
 	fSample  := (fSample  * sc.fFiltera) + (sc.fOldSamples[0] * sc.fFilterb) + (sc.fOldSamples[1] * sc.fFilterc);
 	fSampleR := (fSampleR * sc.fFiltera) + (sc.fOldSamples[2] * sc.fFilterb) + (sc.fOldSamples[3] * sc.fFilterc);
-	fSample  := EnsureRange(fSample, -2.0, +2.0);
-	fSampleR := EnsureRange(fSample, -2.0, +2.0);
+	fSample  := EnsureRange(fSample,  -2.0, +2.0);
+	fSampleR := EnsureRange(fSampleR, -2.0, +2.0);
 	sc.fOldSamples[1] := sc.fOldSamples[0]; sc.fOldSamples[0] := fSample;
 	sc.fOldSamples[3] := sc.fOldSamples[2]; sc.fOldSamples[2] := fSampleR; }
 
@@ -529,7 +534,7 @@ var
 	Chan: Boolean;
 	Data, DataEnd: T;
 begin
-	for Chan := False to (S.Data[True].Data <> nil) do
+	for Chan := False to S.IsStereo do
 	begin
 		Data := S.Data[Chan].Data;
 		DataEnd := Data + sc.LoopEnd;
@@ -549,7 +554,7 @@ var
 	Chan: Boolean;
 	ptr, LoopBegin, LoopEnd: T;
 begin
-	for Chan := False to (S.Data[True].Data <> nil) do
+	for Chan := False to S.IsStereo do
 	begin
 		ptr := S.Data[Chan].Data;
 		LoopBegin := ptr + sc.LoopBegin;
@@ -587,7 +592,7 @@ var
 	Chan: Boolean;
 	ptr, LoopBegin, LoopEnd: T;
 begin
-	for Chan := False to (S.Data[True].Data <> nil) do
+	for Chan := False to S.IsStereo do
 	begin
 		ptr := S.Data[Chan].Data;
 		LoopBegin := ptr + sc.LoopBegin;
@@ -625,7 +630,7 @@ var
 	Chan: Boolean;
 	ptr, LoopBegin, LoopEnd: T;
 begin
-	for Chan := False to (S.Data[True].Data <> nil) do
+	for Chan := False to S.IsStereo do
 	begin
 		ptr := S.Data[Chan].Data;
 
@@ -1232,7 +1237,7 @@ begin
 	begin
 		// 1-bit triangular dithering
 		fPrng := Random32 * (0.5 / MaxLongInt); // -0.5f .. 0.5f
-		fOut  := MixBuffer[MixTransferOffset] * 32768;
+		fOut  := MixBuffer[MixTransferOffset] * MixGain;
 		Inc(MixTransferOffset);
 		fOut := (fOut + fPrng) - PrngState[Chan];
 		PrngState[Chan] := fPrng;
@@ -1315,6 +1320,79 @@ begin
 	end;
 end;
 
+// We need to change the mixing gain if the module came from ModPlug Tracker.
+procedure TITAudioDriver_HQ.SetMixGain;
+const
+	// table from OpenMPT, with normalization edit
+	PreAmpTable: array [0..15] of Float = (
+		64/$60, 64/$60, 64/$60, 64/$70, // 0-7
+		64/$80, 64/$88, 64/$90, 64/$98, // 8-15
+		64/$A0, 64/$A4, 64/$A8, 64/$AC, // 16-23
+		64/$B0, 64/$B4, 64/$B8, 64/$BC  // 24-31
+	);
+var
+	i, HighestChannel: Integer;
+	maskvar: array [0..127] of Byte;
+	p: PByte;
+	row: Word;
+	B, ch: Byte;
+	pat: TITPattern;
+begin
+	MixGain := 32768;
+
+	if Module = nil then Exit;
+
+	if ((Module.Header.Cwtv = $0214) and (Module.Header.Cmwt = $0202) or
+		(Module.Header.Cwtv = $0217) and (Module.Header.Cmwt = $0200)) then
+	begin
+		// find highest used channel
+		HighestChannel := 0;
+
+		for i := 0 to Module.Header.PatNum-1 do
+		begin
+			pat := Module.Patterns[i];
+			p   := @pat.PackedData[0];
+			if (p = nil) or (pat.Rows = 0) then Continue;
+
+			row := 0;
+			while True do
+			begin
+				B := p^;
+				Inc(p);
+
+				if B = 0 then
+				begin
+					Inc(row);
+					if row >= pat.Rows then Break;
+				end
+				else
+				begin
+					ch := (B - 1) and 127;
+					if ch > HighestChannel then
+						HighestChannel := ch;
+					if HighestChannel > 31 then
+					begin
+						HighestChannel := 31;
+						Break;
+					end;
+					if (B and $80) <> 0 then
+					begin
+						maskvar[ch] := p^;
+						Inc(p);
+					end;
+
+					if (maskvar[ch] and 1) <> 0 then Inc(p);
+					if (maskvar[ch] and 2) <> 0 then Inc(p);
+					if (maskvar[ch] and 4) <> 0 then Inc(p);
+					if (maskvar[ch] and 8) <> 0 then Inc(p, 2);
+				end;
+			end;
+		end;
+
+		MixGain *= PreAmpTable[HighestChannel div 2];
+	end;
+end;
+
 procedure TITAudioDriver_HQ.SetTempo(Tempo: Byte);
 var
 	i: Cardinal;
@@ -1346,6 +1424,11 @@ begin
 	end;
 end;
 
+procedure TITAudioDriver_HQ.SongLoaded;
+begin
+	SetMixGain;
+end;
+
 constructor TITAudioDriver_HQ.Create(AModule: TITModule; DriverType: TITAudioDriverType; MixingFrequency: Integer);
 var
 	i, MaxSamplesToMix: Integer;
@@ -1358,6 +1441,8 @@ begin
 	Flags.DF_SUPPORTS_EXTENDED_FILTER_RANGE := True;
 
 	NumChannels := 256;
+
+	MixGain := 32768;
 
 	// 32769Hz is absolute lowest (for FreqMulVal to fit in INT32_MAX)
 	MixingFrequency := EnsureRange(MixingFrequency, 32769, 768000);
