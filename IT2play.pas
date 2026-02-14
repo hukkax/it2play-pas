@@ -656,7 +656,7 @@ type
 		procedure ModuleLoaded;
 
 		function  OpenMixer: Boolean; // 16000..64000, 256..8192
-		procedure LockMixer;
+		function  LockMixer: Boolean;
 		procedure UnlockMixer;
 		procedure CloseMixer;
 
@@ -696,6 +696,7 @@ type
 		NumberOfRows, CurrentTick, CurrentSpeed, ProcessTick: Word;
 		Tempo, GlobalVolume: Word;
 		ChannelsUsed: Byte;
+		MixerLocked: Boolean;
 
 		Driver: TITAudioDriver;
 
@@ -6438,14 +6439,12 @@ var
 	hc: THostChannel;
 	sc: TSlaveChannel;
 begin
-	LockMixer;
-
 	for i := 0 to MAX_HOST_CHANNELS-1 do
 	begin
 		hc := HostChannels[i];
 		hc.Flags.WordAccess := 0;
 		hc.PattLoopStartRow := 0;
-		hc.PattLoopCount   := 0;
+		hc.PattLoopCount    := 0;
 	end;
 
 	for i := 0 to MAX_SLAVE_CHANNELS-1 do
@@ -6455,13 +6454,16 @@ begin
 		sc.Flags.SF_NOTE_STOP := True;
 	end;
 
-	UnlockMixer;
+	GlobalVolume := Header.GlobalVol;
+	Tempo        := Header.InitialTempo;
+	InitTempo;
 end;
 
 procedure TITModule.SeekTo(Order: Word);
 begin
+	if not LockMixer then Exit;
+
 	StopChannels;
-	LockMixer;
 
 	if Order < MAX_ORDERS then
 		CurrentOrder := Order-1
@@ -6474,6 +6476,7 @@ begin
 	CurrentTick  := 1;
 	RowDelay     := 1;
 	RowDelayOn   := False;
+
 	UnlockMixer;
 end;
 
@@ -7152,13 +7155,18 @@ begin
 		Result := OnOpenMixer(Self, MixingFrequency, MixingBufferSize)
 	else
 		Result := False;
+	MixerLocked := False;
 end;
 
 // disable or enable mixing while buffer is being processed
-procedure TITModule.LockMixer;
+function TITModule.LockMixer: Boolean;
 begin
-	if (Driver <> nil) and (Assigned(OnLockMixer)) then
+	Result := (not MixerLocked) and (Driver <> nil) and (Assigned(OnLockMixer));
+	if Result then
+	begin
 		OnLockMixer(Self, True);
+		MixerLocked := True;
+	end;
 end;
 
 // enables mixing again
@@ -7166,28 +7174,36 @@ procedure TITModule.UnlockMixer;
 begin
 	if (Driver <> nil) and (Assigned(OnLockMixer)) then
 		OnLockMixer(Self, False);
+	MixerLocked := False;
 end;
 
 procedure TITModule.CloseMixer;
 begin
 	if Assigned(OnCloseMixer) then
 		OnCloseMixer(Self);
+	MixerLocked := False;
 end;
 
 procedure TITModule.SetMixingVolume(Value: Byte);
 begin
+	if (Header.MixVolume = Value) or (not LockMixer) then Exit;
+
 	if Value > 128 then Value := 128;
 	Header.MixVolume := Value;
 	if Driver <> nil then
 		Driver.SetMixVolume(Value);
+
+	UnlockMixer;
 end;
 
 procedure TITModule.SetPanSeparation(Value: Byte);
 begin
+	if (Header.PanSep = Value) or (not LockMixer) then Exit;
+
 	if Value > 128 then Value := 128;
-	if Driver <> nil then
-		Driver.WaitFor;
 	Header.PanSep := Value;
+
+	UnlockMixer;
 end;
 
 procedure TITModule.SetDriverType(NewDriver: TITAudioDriverType);
