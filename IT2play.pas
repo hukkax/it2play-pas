@@ -6460,20 +6460,16 @@ end;
 
 procedure TITModule.SeekTo(Order: Word);
 begin
-	if not Playing then Exit;
-
 	StopChannels;
 	LockMixer;
 
 	if Order < MAX_ORDERS then
-	begin
-		CurrentOrder := Order-1;
-		ProcessOrder := CurrentOrder;
-	end
+		CurrentOrder := Order-1
 	else
 	if Order = SEEK_ORDER_PREV then
 		CurrentOrder -= 2;
 
+	ProcessOrder := CurrentOrder;
 	ProcessRow   := $FFFE;
 	CurrentTick  := 1;
 	RowDelay     := 1;
@@ -6483,13 +6479,13 @@ end;
 
 procedure TITModule.PreviousOrder;
 begin
-	if CurrentOrder > 0 then
+	if (Playing) and (CurrentOrder > 0) then
 		SeekTo(SEEK_ORDER_PREV);
 end;
 
 procedure TITModule.NextOrder;
 begin
-	if CurrentOrder < MAX_ORDERS then
+	if (Playing) and (CurrentOrder < MAX_ORDERS-1) then
 		SeekTo(SEEK_ORDER_NEXT);
 end;
 
