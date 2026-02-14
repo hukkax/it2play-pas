@@ -847,7 +847,8 @@ var
 
 		if SamplesToMix > 0 then
 		begin
-			MixFunc(sc, MixBufferPtr, SamplesToMix);
+			if sc.Sample <> nil then
+				MixFunc(sc, MixBufferPtr, SamplesToMix);
 
 			MixBufferPtr += SamplesToMix * 2;
 			MixBlockSize -= SamplesToMix;
@@ -901,7 +902,7 @@ begin
 			Continue;
 
 		Sam := sc.Sample;
-		Assert(Sam <> nil);
+		if Sam = nil then Continue;
 
 		if sc.Flags.SF_NOTE_STOP then // note cut
 		begin

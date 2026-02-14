@@ -2346,7 +2346,7 @@ var
 	smp: TITSample;
 begin
 	smp := sc.Sample;
-	Assert(smp <> nil);
+	if smp = nil then Exit;
 
 	if smp.AutoVibratoDepth = 0 then
 		Exit;
@@ -2448,7 +2448,7 @@ var
 	S: TITSample;
 begin
 	S := sc.Sample;
-	Assert(S <> nil);
+	if S = nil then Exit;
 
 	LoopEnabled := (S.Flags.SMPF_USE_LOOP) or (S.Flags.SMPF_USE_SUSTAINLOOP);
 	SustainLoopOnlyAndNoteOff := (S.Flags.SMPF_USE_SUSTAINLOOP) and
@@ -3142,6 +3142,7 @@ procedure TITModule.NoOldEffect(hc: THostChannel; constref hcFlags: THostChannel
 var
 	vol: Byte;
 	sc: TSlaveChannel;
+	S: TITSample;
 begin
 	vol := hc.RawVolColumn;
 
@@ -3159,7 +3160,9 @@ begin
 			Exit;
 		end;
 
-		vol := Samples[hc.Smp-1].Vol; // Default volume
+		S := Samples[hc.Smp-1];
+		if S <> nil then
+			vol := S.Vol; // Default volume
 	end;
 
 	hc.VolSet := vol;
@@ -3284,6 +3287,7 @@ begin
 	// Channel allocated.
 
 	S := sc.Sample;
+	if S = nil then Exit;
 
 	sc.Vol    := hc.VolSet;
 	sc.VolSet := hc.VolSet;
@@ -3301,7 +3305,7 @@ begin
 	sc.Frac32 := 0; // 8bb: clear fractional sampling position
 	sc.Frac64 := 0; // 8bb: also clear frac for my high-quality driver/mixer
 	sc.HasLooped := False; // 8bb: for my high-quality driver/mixer
-	sc.Frequency := Int32(s.C5Speed * PitchTable[hc.TranslatedNote] >> 16);
+	sc.Frequency := Int32(S.C5Speed * PitchTable[hc.TranslatedNote] >> 16);
 	sc.FrequencySet := sc.Frequency;
 
 	hcFlags.HF_CHAN_ON := True;
@@ -3417,7 +3421,7 @@ begin
 
 	// Now to update sample info.
 	s := Samples[sample];
-	sc.Sample := s;
+	sc.Sample := S;
 	sc.AutoVibratoDepth := 0;
 	sc.LoopDirection := 0;
 	sc.Frac32 := 0; // 8bb: reset sampling position fraction
@@ -3463,7 +3467,7 @@ procedure TITModule.InitCommandG11(hc: THostChannel);
 var
 	sc: TSlaveChannel;
 	ins: TITInstrument;
-	s: TITSample;
+	S: TITSample;
 	ChangeInstrument, volFromVolColumn: Boolean;
 	vol, hcSmp, oldSlaveIns: Byte;
 	oldSCFlags, SlideSpeed: Word;
@@ -3533,9 +3537,12 @@ begin
 			if hc.Smp <> 101 then
 				sc.Note := hc.TranslatedNote;
 
-			s := sc.Sample;
-			hc.PortaFreq := UInt64(s.C5Speed * PitchTable[hc.TranslatedNote]) >> 16;
-			hc.Flags.HF_PITCH_SLIDE_ONGOING := True;
+			S := sc.Sample;
+			if S <> nil then
+			begin
+				hc.PortaFreq := UInt64(s.C5Speed * PitchTable[hc.TranslatedNote]) >> 16;
+				hc.Flags.HF_PITCH_SLIDE_ONGOING := True;
+			end;
 		end
 		else
 		if hc.Flags.HF_CHAN_ON then
@@ -3573,6 +3580,7 @@ begin
 	end;
 
 	if (volFromVolColumn) or (hc.NotePackMask and $22 <> 0) then
+	if sc.Sample <> nil then
 	begin
 		if not volFromVolColumn then
 			vol := sc.Sample.Vol;
@@ -6000,7 +6008,7 @@ begin
 		// read editor timestamps if present
 		if (Header.Special and 2) <> 0 then
 		begin
-			offset := Stream.ReadWord;
+			offset := Stream.ReadWord and $FF;
 			if offset > 0 then
 			begin
 				SetLength(EditorTimeStamps, offset);
@@ -6707,12 +6715,6 @@ begin
 
 	SongMessage := TStringList.Create;
 	EmptyPattern := TITPattern.Create;
-
-	for i := 0 to MAX_SAMPLES-1 do
-		Samples[i] := TITSample.Create(Self);
-
-	for i := 0 to MAX_INSTRUMENTS-1 do
-		Instruments[i] := TITInstrument.Create;
 
 	Driver := nil;
 end;

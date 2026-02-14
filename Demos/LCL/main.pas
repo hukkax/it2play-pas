@@ -168,7 +168,7 @@ end;
 
 procedure TMainForm.LoadModule(const Filename: String);
 var
-	i: Integer;
+	i, c: Integer;
 	S: String;
 	Sam: TITSample;
 	Ins: TITInstrument;
@@ -250,6 +250,7 @@ begin
 		with MemoMod do
 		begin
 			Lines.Clear;
+
 			Lines.Add(Format('Filename:       %s', [ExtractFilename(Filename)]));
 			Lines.Add(Format('Song title:     %s', [Module.Header.SongName]));
 			Lines.Add(Format('Duration:       %d:%.2d:%.2d',
@@ -261,6 +262,16 @@ begin
 			Lines.Add(Format('Old effects:    %s', [IfThen(Module.Header.Flags.ITF_OLD_EFFECTS, 'Yes', 'No')]));
 			Lines.Add(Format('Compatible Gxx: %s', [IfThen(Module.Header.Flags.ITF_COMPAT_GXX,  'Yes', 'No')]));
 			Lines.Add(Format('Filter ranges:  %s', [IfThen(Module.Header.Flags.ITF_EXTENDED_FILTER_RANGE,  'Extended (MPT)', 'Normal')]));
+
+			c := 0;
+			for i := 0 to MAX_SAMPLES-1 do
+				if Module.Samples[i] <> nil then Inc(c);
+			Lines.Add(Format('Samples allocated:     %d', [c]));
+
+			c := 0;
+			for i := 0 to MAX_INSTRUMENTS-1 do
+				if Module.Instruments[i] <> nil then Inc(c);
+			Lines.Add(Format('Instruments allocated: %d', [c]));
 
 			if Length(Module.EditorTimeStamps) > 0 then
 			begin
