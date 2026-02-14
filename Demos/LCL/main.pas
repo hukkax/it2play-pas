@@ -23,9 +23,13 @@ interface
 
 uses
 	Classes, SysUtils, Forms, Controls, Graphics, Dialogs,
-	LCLType, StdCtrls, ExtCtrls, ComCtrls,
+	LCLType, StdCtrls, ExtCtrls, ComCtrls, Math,
+	LMessages, LCLIntf, // for messaging
 	AudioDeviceUnit, // <- macro!
 	IT2play;
+
+const
+	WM_UPDATEGUI = LM_USER + 2004;
 
 type
 	TMainForm = class(TForm)
@@ -40,8 +44,6 @@ type
 		tsPatterns: TTabSheet;
 		lbInstruments: TListBox;
 		lbPatterns: TListBox;
-		bPrevOrder: TButton;
-		bNextOrder: TButton;
 		lOrder: TLabel;
 		lTempo: TLabel;
 		lPattern: TLabel;
@@ -56,7 +58,7 @@ type
 		sbPanSep: TScrollBar;
 		cmbDriver: TComboBox;
 		Label1: TLabel;
-		Button1: TButton;
+		sbOrder: TScrollBar;
 
 		procedure FormShow(Sender: TObject);
 		procedure FormDestroy(Sender: TObject);
@@ -73,9 +75,12 @@ type
 		procedure cbStereoChange(Sender: TObject);
 		procedure sbPanSepScroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
 		procedure cmbDriverChange(Sender: TObject);
-		procedure Button1Click(Sender: TObject);
+		procedure sbOrderScroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
 	private
 		procedure LoadModule(const Filename: String);
+
+		// message handlers
+		procedure UpdateGUI(var Msg: TLMessage); message WM_UPDATEGUI;
 
 		// callback handlers
 		procedure OnRowChange(M: TITModule);
@@ -174,6 +179,8 @@ begin
 	lbPatterns.Items.Clear;
 	Memo.Lines.Clear;
 
+	sbOrder.Position := 0;
+
 	// wait until audio output has finished processing
 
 	if Module.Playing then
@@ -245,7 +252,7 @@ begin
 			Lines.Clear;
 			Lines.Add(Format('Filename:       %s', [ExtractFilename(Filename)]));
 			Lines.Add(Format('Song title:     %s', [Module.Header.SongName]));
-			Lines.Add(Format('Duration:       %d:%.2d.%.2d',
+			Lines.Add(Format('Duration:       %d:%.2d:%.2d',
 				[Module.SongDuration.Hours, Module.SongDuration.Minutes, Module.SongDuration.Seconds]));
 			Lines.Add(Format('Total channels: %d', [Module.ChannelsUsed]));
 			Lines.Add(Format('Channels:       %s', [IfThen(Module.Header.Flags.ITF_STEREO,      'Stereo', 'Mono')]));
@@ -273,6 +280,7 @@ begin
 	end
 	else
 	begin
+		sbOrder.Max := 0;
 		bPlay.Caption := '-';
 		bPlay.Enabled := False;
 		PageControl.Enabled := False;
@@ -282,19 +290,28 @@ begin
 	Output.Unlock;
 end;
 
-procedure TMainForm.OnRowChange(M: TITModule);
+procedure TMainForm.UpdateGUI(var Msg: TLMessage);
 begin
 	// display song progress
 	lOrder.Caption := Format('Order %d / %d ',
-		[Module.CurrentOrder, Module.Header.OrdNum-1]);
+		[Module.CurrentOrder, Max(0, Module.Header.OrdNum-2)]);
 	lPattern.Caption := Format('Pattern: %d.%.2d / %d ',
 		[Module.CurrentPattern, Module.CurrentRow, Module.Header.PatNum-1]);
 	lTempo.Caption := Format('Tempo/Speed: %d / %d ',
 		[Module.Tempo, Module.CurrentSpeed]);
 	lVoices.Caption := Format('Active voices: %d ', [Module.GetActiveVoices]);
 
+	sbOrder.Max      := Max(0, Module.Header.OrdNum-2);
+	sbOrder.Position := Module.CurrentOrder;
+
 	if Module.MixingVolume <> sbMixVol.Position then
 		sbMixVol.Position := Module.MixingVolume;
+end;
+
+procedure TMainForm.OnRowChange(M: TITModule);
+begin
+	// callback may get called from a different thread so we can't update UI here
+	PostMessage(MainForm.Handle, WM_UPDATEGUI, 0, 0);
 end;
 
 procedure TMainForm.OnBufferFilled(M: TITModule);
@@ -525,20 +542,11 @@ begin
 		Module.DriverType := TITAudioDriverType(cmbDriver.ItemIndex);
 end;
 
-procedure TMainForm.Button1Click(Sender: TObject);
-var
-	WasPlaying: Boolean;
+procedure TMainForm.sbOrderScroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
 begin
-	WasPlaying := Module.Playing;
-	if WasPlaying then
-		Module.Stop;
-
-	Module.GetOptimumVolume;
-
-	if WasPlaying then
-		Module.Play;
+	if Module.CurrentOrder <> ScrollPos then
+		Module.SeekTo(ScrollPos);
 end;
-
 
 end.
 

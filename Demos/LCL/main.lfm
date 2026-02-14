@@ -9,13 +9,12 @@ object MainForm: TMainForm
   ClientWidth = 855
   KeyPreview = True
   Position = poScreenCenter
-  LCLVersion = '4.0.0.4'
   OnDestroy = FormDestroy
   OnDropFiles = FormDropFiles
   OnShow = FormShow
   object bPlay: TButton
     Left = 12
-    Height = 64
+    Height = 43
     Top = 13
     Width = 117
     Caption = 'Play'
@@ -25,7 +24,7 @@ object MainForm: TMainForm
   object pb: TPaintBox
     Left = 12
     Height = 64
-    Top = 95
+    Top = 120
     Width = 400
     Color = 3684408
     ParentColor = False
@@ -49,8 +48,8 @@ object MainForm: TMainForm
   end
   object PageControl: TPageControl
     Left = 12
-    Height = 517
-    Top = 200
+    Height = 493
+    Top = 224
     Width = 400
     ActivePage = TabSheet1
     Anchors = [akTop, akLeft, akBottom]
@@ -58,7 +57,7 @@ object MainForm: TMainForm
     TabOrder = 2
     object TabSheet1: TTabSheet
       Caption = 'Module'
-      ClientHeight = 484
+      ClientHeight = 460
       ClientWidth = 392
       object GroupBox1: TGroupBox
         Left = 8
@@ -139,7 +138,7 @@ object MainForm: TMainForm
       end
       object MemoMod: TMemo
         Left = 8
-        Height = 312
+        Height = 288
         Top = 164
         Width = 376
         Align = alClient
@@ -158,11 +157,11 @@ object MainForm: TMainForm
     end
     object tsSamples: TTabSheet
       Caption = 'Samples'
-      ClientHeight = 484
+      ClientHeight = 460
       ClientWidth = 392
       object lbSamples: TListBox
         Left = 0
-        Height = 356
+        Height = 332
         Top = 0
         Width = 392
         Align = alClient
@@ -177,7 +176,7 @@ object MainForm: TMainForm
       object pbSample: TPaintBox
         Left = 0
         Height = 128
-        Top = 356
+        Top = 332
         Width = 392
         Align = alBottom
         Color = clBtnFace
@@ -187,11 +186,11 @@ object MainForm: TMainForm
     end
     object tsInstruments: TTabSheet
       Caption = 'Instruments'
-      ClientHeight = 484
+      ClientHeight = 460
       ClientWidth = 392
       object lbInstruments: TListBox
         Left = 0
-        Height = 484
+        Height = 460
         Top = 0
         Width = 392
         Align = alClient
@@ -205,11 +204,11 @@ object MainForm: TMainForm
     end
     object tsPatterns: TTabSheet
       Caption = 'Patterns'
-      ClientHeight = 484
+      ClientHeight = 460
       ClientWidth = 392
       object lbPatterns: TListBox
         Left = 0
-        Height = 484
+        Height = 460
         Top = 0
         Width = 392
         Align = alClient
@@ -223,59 +222,41 @@ object MainForm: TMainForm
       end
     end
   end
-  object bPrevOrder: TButton
-    Left = 144
-    Height = 30
-    Top = 13
-    Width = 54
-    Caption = '<<'
-    TabOrder = 3
-    OnClick = bPrevOrderClick
-  end
-  object bNextOrder: TButton
-    Left = 144
-    Height = 30
-    Top = 47
-    Width = 54
-    Caption = '>>'
-    TabOrder = 4
-    OnClick = bNextOrderClick
-  end
   object lOrder: TLabel
-    Left = 215
+    Left = 12
     Height = 20
-    Top = 11
-    Width = 4
-    Caption = ' '
+    Top = 88
+    Width = 18
+    Caption = '---'
   end
   object lTempo: TLabel
-    Left = 215
+    Left = 144
     Height = 20
-    Top = 57
-    Width = 4
-    Caption = ' '
+    Top = 36
+    Width = 18
+    Caption = '---'
   end
   object lPattern: TLabel
-    Left = 215
+    Left = 144
     Height = 20
-    Top = 34
+    Top = 13
     Width = 177
     Caption = 'Drag''n''drop a song to play'
   end
   object lVoices: TLabel
     Left = 12
     Height = 20
-    Top = 165
+    Top = 192
     Width = 102
     Caption = 'Active Voices: 0'
   end
-  object Button1: TButton
-    Left = 337
-    Height = 25
-    Top = 165
-    Width = 75
-    Caption = 'Volume'
-    TabOrder = 5
-    OnClick = Button1Click
+  object sbOrder: TScrollBar
+    Left = 12
+    Height = 17
+    Top = 64
+    Width = 400
+    PageSize = 0
+    TabOrder = 3
+    OnScroll = sbOrderScroll
   end
 end
