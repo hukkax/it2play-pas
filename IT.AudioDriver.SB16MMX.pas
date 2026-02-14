@@ -403,7 +403,7 @@ begin
 
 			if sc.Flags.SF_FREQ_CHANGE then
 			begin
-				if (SarLongInt(sc.Frequency, MIX_FRAC_BITS) >= MixSpeed) or
+				if (SarLongInt(sc.Frequency, MIX_FRAC_BITS) >= MixFrequency) or
 					(sc.Frequency >= (MaxInt div 2)) then
 				begin
 					// 8bb: non-IT2 limit, but required for safety
@@ -416,13 +416,13 @@ begin
 
 				// 8bb: calculate mixer delta (could be faster, but slow method needed for OldSamplesBug)
 				//
-				Quotient  := Cardinal(sc.Frequency) div MixSpeed;
-				Remainder := Cardinal(sc.Frequency) mod MixSpeed;
+				Quotient  := Cardinal(sc.Frequency) div MixFrequency;
+				Remainder := Cardinal(sc.Frequency) mod MixFrequency;
 				sc.Delta32 := Quotient << MIX_FRAC_BITS;
 
 				Remainder := Remainder << MIX_FRAC_BITS;
-				Quotient  := (Remainder div MixSpeed) and $FFFF;
-				Remainder := Remainder mod MixSpeed;
+				Quotient  := (Remainder div MixFrequency) and $FFFF;
+				Remainder := Remainder mod MixFrequency;
 				sc.Delta32 := sc.Delta32 or Quotient;
 
 				OldSamplesBug := Remainder; // 8bb: fun

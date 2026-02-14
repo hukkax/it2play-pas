@@ -283,9 +283,9 @@ begin
 			if ((uint32_t)sc->Frequency>>MIX_FRAC_BITS >= Driver.MixSpeed ||
 				(uint32_t)sc->Frequency >= INT32_MAX/2)
 			}
-			//if ((sc.Frequency div $FFFF) >= MixSpeed) or
+			//if ((sc.Frequency div $FFFF) >= MixFrequency) or
 			Foo := Cardinal(sc.Frequency);
-			if ((Foo >> MIX_FRAC_BITS) >= MixSpeed) or
+			if ((Foo >> MIX_FRAC_BITS) >= MixFrequency) or
 				(Foo >= MaxInt div 2) then // 8bb: non-IT2 limit, but required for safety
 			begin
 				sc.Flags.WordAccess := 0;
@@ -301,10 +301,10 @@ begin
 			uint32_t Remainder = (uint32_t)sc->Frequency % Driver.MixSpeed;
 			sc->Delta32 = (Quotient << MIX_FRAC_BITS) | (uint16_t)((Remainder << MIX_FRAC_BITS) / Driver.MixSpeed);
 			}
-			Quotient  := Foo div MixSpeed;
-			Remainder := Foo mod MixSpeed;
+			Quotient  := Foo div MixFrequency;
+			Remainder := Foo mod MixFrequency;
 
-			sc.Delta32 := (Quotient << MIX_FRAC_BITS) or (((Remainder << MIX_FRAC_BITS) div MixSpeed) and $FFFF);
+			sc.Delta32 := (Quotient << MIX_FRAC_BITS) or (((Remainder << MIX_FRAC_BITS) div MixFrequency) and $FFFF);
 		end;
 
 		if (sc.Flags.SF_UPDATE_MIXERVOL) or (sc.Flags.SF_LOOP_CHANGED) or (sc.Flags.SF_PAN_CHANGED) then

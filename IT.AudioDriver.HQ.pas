@@ -87,10 +87,6 @@ implementation
 
 // Common macros for mixing functions
 
-{$DEFINE SincInterpolationCommon :=
-	((s[-3] * t[0]) + (s[-2] * t[1]) + (s[-1] * t[2]) + (s[+0] * t[3]) +
-	 (s[+1] * t[4]) + (s[+2] * t[5]) + (s[+3] * t[6]) + (s[+4] * t[7])) }
-
 {$DEFINE GetSamplePtrs :=
 	base := sc.Sample.Data[False].Data;
 	smp  := base + sc.SamplingPosition; }
@@ -181,6 +177,10 @@ implementation
 	GetSamplePtrsStereo;
 	for i := 1 to NumSamples do DoMix;
 	sc.SamplingPosition := Int32(smp - base); }
+
+{$DEFINE SincInterpolationCommon :=
+	((s[-3] * t[0]) + (s[-2] * t[1]) + (s[-1] * t[2]) + (s[+0] * t[3]) +
+	 (s[+1] * t[4]) + (s[+2] * t[5]) + (s[+3] * t[6]) + (s[+4] * t[7])) }
 
 function SincInterpolation8(s: PInt8; t: PFloat): Float; inline;
 begin
@@ -1355,6 +1355,7 @@ begin
 	Flags.DF_SUPPORTS_MIDI        := True;
 	Flags.DF_USES_VOLRAMP         := True;
 	Flags.DF_HAS_RESONANCE_FILTER := True;
+	Flags.DF_SUPPORTS_EXTENDED_FILTER_RANGE := True;
 
 	NumChannels := 256;
 
