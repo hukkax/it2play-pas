@@ -1223,8 +1223,6 @@ end;
 // ================================================================================================
 
 constructor TITAudioDriver.Create(AModule: TITModule; DriverType: TITAudioDriverType; MixingFrequency: Integer);
-var
-	i: Integer;
 begin
 	inherited Create;
 
@@ -5756,8 +5754,6 @@ begin
 end;
 
 procedure TITModule.FindSubSongs;
-var
-	i: Integer;
 begin
 end;
 
@@ -6680,8 +6676,6 @@ begin
 end;
 
 constructor TITModule.Create;
-var
-	i: Integer;
 begin
 	inherited Create;
 
